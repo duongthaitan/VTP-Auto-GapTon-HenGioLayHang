@@ -1,111 +1,138 @@
 <div align="center">
 
-<img src="https://via.placeholder.com/1000x250/ee0033/ffffff?text=VTP+Tool+All-in-One+-+Supercharge+Your+Workflow" alt="VTP Tool Banner" width="100%" style="border-radius: 12px;">
+<img src="https://via.placeholder.com/800x200/ee0033/ffffff?text=VTP+Tool+All-in-One+-+Supercharge+Your+Workflow" alt="VTP Tool Banner" width="100%" style="border-radius: 12px; margin-bottom: 20px;">
 
-<br/>
+# 🚀 VTP Tool All-in-One
 
-# 📦 VTP Tool All-in-One
+**Giải pháp tự động hóa tối thượng dành cho hệ thống Viettel Post**
 
-**Bộ công cụ tự động hóa đột phá dành riêng cho hệ thống Viettel Post**
-
+[![Phiên bản](https://img.shields.io/badge/version-1.0.0-0056b3.svg?style=for-the-badge&logo=appveyor)](https://github.com/duongthaitan)
+[![Nền tảng](https://img.shields.io/badge/Chrome-Extension-4db8ff.svg?style=for-the-badge&logo=google-chrome)](https://google.com/chrome)
 [![Tác giả](https://img.shields.io/badge/Tác_giả-Thái_Tân_Dương-ee0033.svg?style=for-the-badge&logo=github)](https://github.com/duongthaitan)
-[![Phiên bản](https://img.shields.io/badge/Version-1.0.0-0056b3.svg?style=for-the-badge&logo=semver)](https://github.com/duongthaitan)
-[![Nền tảng](https://img.shields.io/badge/Chrome_Extension-4db8ff.svg?style=for-the-badge&logo=google-chrome)](https://google.com/chrome)
-[![JavaScript](https://img.shields.io/badge/Vanilla_JS-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)]()
 [![Giấy phép](https://img.shields.io/badge/License-MIT-success.svg?style=for-the-badge)](LICENSE)
 
-*Một tiện ích nhỏ gọn, mạnh mẽ giúp bạn tiết kiệm hàng giờ thao tác thủ công mỗi ngày.*
+*Tiết kiệm hàng giờ thao tác thủ công, giảm thiểu sai sót và tăng tốc hiệu suất làm việc lên đến 300%.*
 
-[🚀 Cài đặt nhanh](#-hướng-dẫn-cài-đặt) • [📖 Cách sử dụng](#-hướng-dẫn-sử-dụng) • [🐛 Báo lỗi](mailto:duongthaitan13@gmail.com)
+[📥 Tải về ngay](#-hướng-dẫn-cài-đặt) • [📖 Xem hướng dẫn](#-cẩm-nang-sử-dụng) • [🐛 Báo lỗi](mailto:duongthaitan13@gmail.com)
 
 </div>
 
 ---
 
-## ⚡ Giới thiệu dự án
-
-**VTP Tool All-in-One** là tiện ích mở rộng (Chrome Extension) được thiết kế đặc biệt nhằm tối ưu hóa quy trình làm việc trên nền tảng Viettel Post. Bằng cách gộp hai tính năng cốt lõi là **Auto Sửa Giờ** và **Auto Kiểm Tồn**, công cụ giúp tự động hóa các thao tác lặp đi lặp lại, bypass các bước xác nhận rườm rà và hiển thị luồng công việc theo thời gian thực (Real-time HUD).
-
-> **💡 Triết lý thiết kế:**
-> *Nhanh - Nhẹ - Không xâm nhập.* Toàn bộ mã nguồn sử dụng **Vanilla JavaScript**, không phụ thuộc vào thư viện nặng nề như jQuery, kết hợp với hệ thống **Custom Toast Notification** giúp trải nghiệm người dùng mượt mà tuyệt đối.
-
----
-
-## 🌟 Bảng tính năng cốt lõi
-
-| 🕒 Module Sửa Giờ (Tab 1) | 📦 Module Kiểm Tồn (Tab 2) |
-| :--- | :--- |
-| **Xử lý Batch đệ quy:** Dán hàng trăm mã, công cụ tự động lặp qua từng mã và xử lý gọn gàng. | **Bypass UI & DOM Injection:** Tự động hóa quá trình điền mã và nhận diện trạng thái nhanh gấp 3 lần. |
-| **Smart Date Selector:** Thuật toán ưu tiên chọn "Ngày kia", "Ngày mai" và "Cả ngày" chuẩn xác. | **HUD Overlay Dashboard:** Giao diện điều khiển nổi hiển thị % tiến trình ngay trên trang làm việc. |
-| **Network-Adaptive Delay:** Tùy chỉnh trực tiếp <kbd>Delay</kbd> để tránh bị nghẽn mạng do VTP server lag. | **Data Export:** Ghi log trạng thái chi tiết và cho phép xuất trực tiếp ra file Excel (`.csv`). |
+## 📑 Mục lục
+1. [🌟 Tính năng đột phá](#-tính-năng-đột-phá)
+2. [🎥 Demo hoạt động](#-demo-hoạt-động)
+3. [🚀 Hướng dẫn cài đặt](#-hướng-dẫn-cài-đặt)
+4. [💡 Cẩm nang sử dụng](#-cẩm-nang-sử-dụng)
+5. [❓ Câu hỏi thường gặp (FAQ)](#-câu-hỏi-thường-gặp-faq)
+6. [📂 Cấu trúc mã nguồn](#-cấu-trúc-mã-nguồn)
+7. [👨‍💻 Tác giả & Hỗ trợ](#-tác-giả--hỗ-trợ)
 
 ---
 
-## 💻 Trải nghiệm thực tế (Demo)
+## 🌟 Tính năng đột phá
+
+Dự án là sự kết hợp hoàn hảo giữa 2 công cụ độc lập, được tinh chỉnh lại trong một giao diện duy nhất:
+
+### 🕒 Module 1: Auto Sửa Giờ (Smart Delay)
+- **Tự động toàn trình:** Tìm kiếm mã đơn $\rightarrow$ Click Sửa $\rightarrow$ Chọn Ngày $\rightarrow$ Cập nhật.
+- **Xử lý Batch:** Hỗ trợ dán hàng trăm mã vận đơn cùng lúc. Vòng lặp đệ quy tự động xử lý lần lượt.
+- **Tuỳ biến linh hoạt:** Cho phép người dùng set `Delay` (thời gian chờ mạng) trực tiếp trên UI để chống lỗi khi web phản hồi chậm.
+
+### 📦 Module 2: Auto Kiểm Tồn (Bypass UI)
+- **Quét siêu tốc:** Nhập mã và kiểm tra trạng thái cực nhanh, bỏ qua các bước xác nhận rườm rà.
+- **Bảng điều khiển HUD:** Bảng UI nổi (Overlay) hiển thị % tiến trình, số mã thành công/thất bại theo thời gian thực.
+- **Trích xuất dữ liệu:** Hỗ trợ xuất trực tiếp kết quả ra file `Excel (.csv)` chỉ với 1 click.
+- **Bộ lọc thông minh:** Nhận diện các đầu mã đặc biệt (SHOPEE, TPO, PSL...) có thể cấu hình thêm.
+
+> **💡 Điểm nhấn:**
+> Toàn bộ hệ thống sử dụng **Toast Notification Custom**, loại bỏ hoàn toàn các popup `alert()` mặc định của trình duyệt, giúp thao tác mượt mà không bị gián đoạn.
+
+---
+
+## 🎥 Demo hoạt động
 
 <div align="center">
-  <img src="https://via.placeholder.com/800x450/f8f9fa/ee0033?text=Chèn+Ảnh+Hoạc+GIF+Demo+Vào+Đây" alt="GIF Demo tính năng" width="100%" style="border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.1);">
-  <p><i>Dashboard tương tác 2 Tabs và Hệ thống thông báo Pop-up chuyên nghiệp.</i></p>
+  <img src="https://via.placeholder.com/700x400/f8f9fa/ee0033?text=Chèn+Ảnh+GIF+Demo+Vào+Đây" alt="GIF Demo tính năng" style="border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+  <p><i>Giao diện Popup chia Tab và Bảng tiến trình Real-time.</i></p>
 </div>
 
 ---
 
 ## 🚀 Hướng dẫn cài đặt
 
-Công cụ được thiết kế dưới dạng Unpacked Extension. Bạn chỉ mất 1 phút để cài đặt:
+Bạn không cần biết code. Chỉ mất **30 giây** để đưa công cụ này vào hoạt động:
 
-1. **Lấy Source Code:** Nhấn vào nút xanh <kbd>Code</kbd> $\rightarrow$ chọn <kbd>Download ZIP</kbd>. Sau đó giải nén ra một thư mục cố định trên máy.
-2. **Mở Quản lý Tiện ích:** - Trên Chrome, nhập vào thanh địa chỉ: `chrome://extensions/`
-   - Trên Edge, nhập: `edge://extensions/`
-3. **Kích hoạt:** Bật công tắc **Chế độ dành cho nhà phát triển** (Developer mode) ở góc phải màn hình.
-4. **Nạp tiện ích:** Bấm vào nút <kbd>Tải tiện ích đã giải nén</kbd> (Load unpacked) và trỏ vào thư mục bạn vừa giải nén.
+1. **Tải Source Code:** Nhấn nút `Code` (màu xanh) $\rightarrow$ `Download ZIP` và giải nén ra một thư mục.
+2. **Truy cập Quản lý Tiện ích:** Mở trình duyệt Chrome/Edge, nhập địa chỉ:
+   - *Chrome:* <kbd>chrome://extensions/</kbd>
+   - *Edge:* <kbd>edge://extensions/</kbd>
+3. **Bật Developer Mode:** Gạt công tắc `Chế độ dành cho nhà phát triển` (Developer mode) ở góc trên bên phải sang **ON**.
+4. **Cài đặt:** Bấm nút `Tải tiện ích đã giải nén` (Load unpacked) và chọn thư mục bạn vừa giải nén ở bước 1.
 
-🎉 *Thành công! Hãy ghim (Pin) biểu tượng tiện ích lên thanh trình duyệt để dùng bất cứ lúc nào.*
-
----
-
-## 📖 Hướng dẫn sử dụng
-
-### 1. Tab Sửa Giờ 🕒
-<details open>
-<summary><b>Nhấp để xem chi tiết các bước</b></summary>
-<br>
-
-* **Bước 1:** Click vào icon tiện ích trên trình duyệt, chọn tab **Sửa Giờ**.
-* **Bước 2:** Dán toàn bộ mã vận đơn cần cập nhật vào ô văn bản. *(Yêu cầu: Mỗi mã nằm trên 1 dòng).*
-* **Bước 3:** Đặt **Độ trễ mạng** (Recommend: `5s` cho mạng khỏe, `8-10s` nếu web Viettel Post đang xoay vòng).
-* **Bước 4:** Bấm <kbd>▶ BẮT ĐẦU CHẠY</kbd>. Công cụ sẽ tự mở giao diện và làm việc.
-</details>
-
-### 2. Tab Kiểm Tồn 📦
-<details open>
-<summary><b>Nhấp để xem chi tiết các bước</b></summary>
-<br>
-
-* **Bước 1:** Đăng nhập và mở đúng màn hình **quản lý đơn hàng / kiểm kê** trên web Viettel Post.
-* **Bước 2:** Bấm icon tiện ích, chuyển sang tab **Kiểm Tồn**. Trạng thái sẽ hiện màu xanh báo hiệu sẵn sàng.
-* **Bước 3:** Bấm <kbd>🚀 CHẠY KIỂM TỒN</kbd>.
-* **Bước 4:** Một Bảng Điều Khiển màu đỏ sẽ trượt lên ở góc dưới cùng bên phải màn hình web. Tool sẽ tự động quét.
-* ⚠️ **Lưu ý:** Tuyệt đối không click chuột, cuộn chuột hay gõ phím vào trang web khi hệ thống đang xử lý.
-</details>
+✅ *Xong! Hãy ghim (pin) icon tiện ích lên thanh công cụ để dễ dàng sử dụng.*
 
 ---
 
-## 🏗 Kiến trúc mã nguồn (Clean Architecture)
+## 💡 Cẩm nang sử dụng
 
-Hệ thống được thiết kế theo chuẩn module hóa (MV3), đảm bảo không xảy ra xung đột bộ nhớ giữa hai tính năng:
+### 🔹 Thao tác với Tab Sửa Giờ
+1. Bấm icon tiện ích góc phải trình duyệt $\rightarrow$ Chọn Tab **Sửa Giờ**.
+2. Dán các mã vận đơn cần xử lý vào khung văn bản (Lưu ý: mỗi mã 1 dòng).
+3. Đặt thời gian chờ mạng (mặc định 5s).
+4. Bấm **▶ BẮT ĐẦU CHẠY**. Công cụ sẽ ẩn đi và tự động làm việc trên tab hiện tại.
+
+### 🔹 Thao tác với Tab Kiểm Tồn
+1. Mở trang quản lý vận đơn của hệ thống Viettel Post.
+2. Bấm icon tiện ích $\rightarrow$ Chọn Tab **Kiểm Tồn**.
+3. Bấm nút **🚀 CHẠY KIỂM TỒN**. Bảng điều khiển HUD sẽ xuất hiện ở góc dưới màn hình.
+4. *Lưu ý quan trọng:* Tuyệt đối không click chuột hoặc gõ phím vào trang web khi hệ thống đang chạy để tránh mất trỏ chuột (focus).
+
+---
+
+## ❓ Câu hỏi thường gặp (FAQ)
+
+<details>
+<summary><b>1. Tool báo lỗi "Vui lòng mở trang Viettel Post" dù tôi đang ở trang đó?</b></summary>
+<br>
+Hãy đảm bảo bạn đang ở đúng URL có chứa miền <code>viettelpost.vn</code> hoặc <code>viettelpost.com.vn</code>. Hãy thử F5 (tải lại) trang web và mở lại tiện ích.
+</details>
+
+<details>
+<summary><b>2. Khi chạy Tab Sửa Giờ, tool bị sót đơn?</b></summary>
+<br>
+Nguyên nhân do mạng hoặc server của VTP phản hồi chậm hơn tốc độ thao tác của tool. Hãy tăng ô <b>Độ trễ mạng</b> từ 5s lên 8s hoặc 10s.
+</details>
+
+<details>
+<summary><b>3. Tại sao xuất file Excel bị lỗi font tiếng Việt?</b></summary>
+<br>
+Hệ thống đã mã hóa chuẩn UTF-8 (BOM). Nếu mở bằng Excel bị lỗi chữ, bạn hãy thử mở bằng Google Sheets, hoặc dùng tính năng <code>Data > From Text/CSV</code> trong Excel để import.
+</details>
+
+---
+
+## 📂 Cấu trúc mã nguồn
+
+Kiến trúc thư mục được phân tách rõ ràng (Clean Code) hỗ trợ dễ dàng nâng cấp:
 
 ```text
 VTP_All_In_One/
-├── manifest.json            # File cấu hình định tuyến (Manifest Version 3)
-├── popup.html               # Giao diện tổng (HTML5/CSS3 Variables)
-├── popup.js                 # Xử lý sự kiện Tabs & Inject Logic (Service)
-├── notification.js          # Hệ thống Toast UI Custom (Global Utility)
-├── chinhgio_content.js      # Core Logic chạy ngầm cho tính năng Sửa Giờ
-├── gapton_settings.js       # Quản lý cấu hình Regex/Prefix cho hệ thống Quét
-├── gapton_smart_delay.js    # MutationObserver Engine (Chống block web)
-└── gapton_core_scan.js      # Core Engine quét DOM, chèn mã và vẽ HUD Overlay
-❓ Câu hỏi thường gặp (FAQ)Q: Tại sao bấm Kiểm Tồn mà tool không chạy?A: Bạn phải đảm bảo đang ở trên đúng Domain viettelpost.vn hoặc viettelpost.com.vn. Nếu web đang trắng hoặc treo, hãy nhấn <kbd>F5</kbd> tải lại trang và mở tab lại.Q: File xuất ra từ phần Kiểm Tồn mở bằng Excel bị lỗi Font?A: Do Excel đôi khi không nhận diện chuẩn UTF-8 mặc định. Bạn hãy khắc phục bằng cách: Mở Excel $\rightarrow$ Tab Data $\rightarrow$ From Text/CSV $\rightarrow$ Chọn File $\rightarrow$ Ở mục File Origin, chọn 65001: Unicode (UTF-8).🤝 Đóng góp & Phát triểnDự án này được tối ưu và duy trì bởi Thái Tân Dương.
-Nếu bạn có ý tưởng cải tiến, tối ưu hóa thuật toán hoặc phát hiện lỗi (bug), đừng ngần ngại:Mở một Issue để thảo luận.Fork dự án, tạo nhánh mới (feature/amazing-feature) và gửi Pull Request.<div align="center">
-<b>⌨️ Coded with ❤️ by Dương</b><a href="mailto:duongthaitan13@gmail.com">duongthaitan13@gmail.com</a> • <a href="https://github.com/duongthaitan">@duongthaitan</a><i>⭐ Nếu dự án này giúp bạn về nhà sớm hơn 1 giờ mỗi ngày, hãy tặng cho repository một ngôi sao nhé! ⭐</i>
-</div>
+├── manifest.json            # [Core] Khai báo quyền & cấu hình Extension V3
+├── popup.html               # [UI] Giao diện popup 2 tabs
+├── popup.js                 # [Logic] Điều hướng tab & Inject script
+├── notification.js          # [Module] Hệ thống Toast Alerts
+├── chinhgio_content.js      # [Feature] Vòng lặp đệ quy xử lý sửa giờ
+├── gapton_settings.js       # [Config] Quản lý Database Local (Prefix)
+├── gapton_smart_delay.js    # [Utils] MutationObserver theo dõi DOM
+└── gapton_core_scan.js      # [Feature] Engine quét mã và vẽ UI HUD
+👨‍💻 Tác giả & Hỗ trợ
+Dự án được xây dựng và tối ưu bởi Thái Tân Dương.
+
+💬 Kết nối với tôi:
+
+📧 Email: duongthaitan13@gmail.com
+
+🐙 GitHub: @duongthaitan
+
+Bạn thấy dự án này có ích? Hãy ủng hộ tác giả bằng cách để lại một ⭐️ cho kho lưu trữ (repository) này nhé. Sự ủng hộ của bạn là động lực lớn để tôi ra mắt thêm nhiều tool chất lượng! ❤️
