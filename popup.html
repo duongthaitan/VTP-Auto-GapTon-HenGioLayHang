@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <title>VTP Tool All-in-One</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+    <!-- ═══ HEADER ═══ -->
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="header-logo">
+                <img src="icon48.png" alt="VTP" width="26" height="26">
+            </div>
+            <div class="header-titles">
+                <span class="header-title">VTP TOOL</span>
+                <span class="header-subtitle">All-in-One Automation</span>
+            </div>
+        </div>
+        <span class="header-version">v1.0</span>
+    </header>
+
+    <!-- ═══ TABS ═══ -->
+    <nav class="tabs">
+        <button class="tab-btn active" data-target="tab-chinhgio">
+            <span class="tab-icon">🕒</span>
+            <span class="tab-label">Sửa Giờ</span>
+        </button>
+        <button class="tab-btn" data-target="tab-gapton">
+            <span class="tab-icon">📦</span>
+            <span class="tab-label">Kiểm Tồn</span>
+        </button>
+    </nav>
+
+    <!-- ═══ TAB 1: SỬA GIỜ ═══ -->
+    <section id="tab-chinhgio" class="tab-content active">
+
+        <div class="field-group">
+            <label class="field-label" for="billList">
+                <span>📋</span> Danh sách mã vận đơn
+            </label>
+            <textarea
+                id="billList"
+                class="field-textarea"
+                placeholder="Dán các mã vận đơn vào đây&#10;Mỗi mã một dòng...​"
+            ></textarea>
+            <div class="field-hint" id="billCount">Chưa có mã nào</div>
+        </div>
+
+        <div class="delay-card">
+            <div class="delay-info">
+                <span class="delay-emoji">⏱️</span>
+                <div>
+                    <span class="delay-label">Độ trễ tĩnh</span>
+                    <span class="delay-desc">Giây chờ sau khi web tải xong</span>
+                </div>
+            </div>
+            <div class="delay-control">
+                <button class="stepper-btn" id="delayMinus" aria-label="Giảm">−</button>
+                <input type="number" id="delay" value="4" min="1" max="30" aria-label="Số giây trễ">
+                <button class="stepper-btn" id="delayPlus" aria-label="Tăng">+</button>
+            </div>
+        </div>
+
+        <div class="action-row">
+            <button id="startChinhGioBtn" class="btn btn-primary">
+                <span>▶</span> Bắt Đầu Chạy
+            </button>
+            <button id="stopChinhGioBtn" class="btn btn-ghost" title="Dừng lại">
+                <span>⏹</span> Dừng
+            </button>
+        </div>
+
+        <div class="progress-card" id="progressContainer">
+            <div class="progress-meta">
+                <span class="progress-label">Tiến trình</span>
+                <span class="progress-pct" id="progressText">0 / 0</span>
+            </div>
+            <div class="progress-track">
+                <div class="progress-fill" id="progressBar"></div>
+            </div>
+        </div>
+
+        <div class="status-pill" id="statusChinhGio">
+            <span class="status-dot"></span>
+            <span class="status-msg">Sẵn sàng</span>
+        </div>
+
+    </section>
+
+    <!-- ═══ TAB 2: KIỂM TỒN ═══ -->
+    <section id="tab-gapton" class="tab-content">
+
+        <div id="statusBoxGapTon" class="page-check not-ready">
+            <span class="page-check-icon">⚠️</span>
+            <div class="page-check-body">
+                <span class="page-check-title">Chưa sẵn sàng</span>
+                <span class="page-check-desc">Đang kiểm tra trang web...</span>
+            </div>
+        </div>
+
+        <button id="startGapTonBtn" class="btn btn-primary btn-full" disabled>
+            🚀 CHẠY KIỂM TỒN
+        </button>
+
+        <div class="notice-card">
+            <p class="notice-title">⚡ Lưu ý quan trọng</p>
+            <ul class="notice-list">
+                <li>Phải mở trang ViettelPost trước khi chạy</li>
+                <li>Không thao tác chuột / bàn phím khi tool đang chạy</li>
+            </ul>
+        </div>
+
+    </section>
+
+    <script src="popup.js"></script>
+</body>
+</html>

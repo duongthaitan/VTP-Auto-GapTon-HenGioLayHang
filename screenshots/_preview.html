@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>VTP Tool – Frontend Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* ════ Tokens ════ */
+:root {
+    --red:#d4002d;--red-hover:#b8002a;--red-light:#ff3358;--red-glow:rgba(212,0,45,.14);--red-soft:#fff1f3;
+    --green:#16a34a;--green-glow:rgba(34,197,94,.45);--green-soft:#f0fdf4;
+    --bg:#f0f2f6;--surface:#fff;--surface-2:#f8fafc;--border:#e4e7ec;
+    --text-1:#111827;--text-2:#4b5563;--text-3:#9ca3af;
+    --shadow-xs:0 1px 2px rgba(0,0,0,.06);--shadow-sm:0 1px 4px rgba(0,0,0,.08),0 0 1px rgba(0,0,0,.04);
+    --radius:10px;--radius-pill:999px;--font:'Inter','Segoe UI',system-ui,sans-serif;--mono:'Consolas','Courier New',monospace;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+
+/* ════ Page layout ════ */
+body{font-family:var(--font);background:#e8eaef;display:flex;flex-wrap:wrap;gap:32px;padding:40px;justify-content:center;min-height:100vh;}
+.popup{width:380px;border-radius:14px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.18),0 4px 16px rgba(0,0,0,.08);flex-shrink:0;}
+.section-label{width:100%;text-align:center;font-size:13px;font-weight:700;color:#6b7280;letter-spacing:.5px;text-transform:uppercase;margin-bottom:10px;}
+
+/* ════ Header ════ */
+.app-header{background:linear-gradient(130deg,#b8002a 0%,var(--red) 45%,#ff2d55 100%);padding:13px 16px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 12px rgba(180,0,40,.38);position:relative;overflow:hidden;}
+.app-header::before{content:'';position:absolute;right:-24px;top:-24px;width:90px;height:90px;background:rgba(255,255,255,.08);border-radius:50%;}
+.header-brand{display:flex;align-items:center;gap:10px;}
+.header-logo{width:38px;height:38px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.25);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:22px;}
+.header-titles{display:flex;flex-direction:column;gap:1px;}
+.header-title{font-size:15px;font-weight:800;color:#fff;letter-spacing:.6px;line-height:1;}
+.header-subtitle{font-size:10px;font-weight:400;color:rgba(255,255,255,.7);letter-spacing:.2px;}
+.header-version{font-size:10px;font-weight:600;color:rgba(255,255,255,.85);background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.22);padding:3px 9px;border-radius:var(--radius-pill);}
+
+/* ════ Tabs ════ */
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);}
+.tab-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:11px 0 9px;border:none;border-bottom:2.5px solid transparent;background:transparent;cursor:pointer;font-family:var(--font);transition:all .18s;}
+.tab-icon{font-size:17px;line-height:1;}
+.tab-label{font-size:11.5px;font-weight:600;color:var(--text-3);}
+.tab-btn.active{border-bottom-color:var(--red);background:#fff5f6;}
+.tab-btn.active .tab-label{color:var(--red);}
+
+/* ════ Content ════ */
+.tab-content{display:flex;flex-direction:column;gap:10px;padding:15px;min-height:290px;background:var(--bg);}
+
+/* Field */
+.field-group{display:flex;flex-direction:column;gap:5px;}
+.field-label{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;}
+.field-textarea{width:100%;height:108px;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius);font-family:var(--mono);font-size:12.5px;line-height:1.65;color:#666;background:var(--surface);resize:none;}
+.field-hint{font-size:11px;font-weight:600;color:var(--text-3);text-align:right;}
+.hint-active{color:var(--red);}
+
+/* Delay card */
+.delay-card{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:10px 14px;box-shadow:var(--shadow-xs);}
+.delay-info{display:flex;align-items:center;gap:10px;}
+.delay-emoji{font-size:22px;}
+.delay-label{display:block;font-size:13px;font-weight:700;color:var(--text-1);line-height:1.2;}
+.delay-desc{display:block;font-size:10.5px;color:var(--text-3);margin-top:2px;}
+.delay-control{display:flex;align-items:center;gap:6px;}
+.stepper-btn{width:28px;height:28px;border:1.5px solid var(--border);border-radius:8px;background:var(--surface-2);color:var(--text-2);font-size:17px;font-weight:600;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+input.delay-input{width:52px;height:28px;text-align:center;border:1.5px solid var(--border);border-radius:8px;font-family:var(--font);font-size:15px;font-weight:700;color:var(--red);background:white;-moz-appearance:textfield;}
+input.delay-input::-webkit-inner-spin-button{-webkit-appearance:none;}
+
+/* Buttons */
+.action-row{display:flex;gap:8px;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:11px 18px;border:none;border-radius:var(--radius);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer;}
+.btn-primary{flex:1;background:linear-gradient(135deg,var(--red) 0%,var(--red-light) 100%);color:#fff;box-shadow:0 3px 10px rgba(212,0,45,.28);}
+.btn-ghost{background:var(--surface);color:var(--text-2);border:1.5px solid var(--border);}
+.btn-full{width:100%;}
+.btn:disabled{background:#e5e7eb!important;color:#9ca3af!important;cursor:not-allowed;box-shadow:none;}
+
+/* Progress */
+.progress-card{background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:11px 13px;box-shadow:var(--shadow-xs);}
+.progress-meta{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;}
+.progress-label{font-size:10.5px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;}
+.progress-pct{font-size:12px;font-weight:700;color:var(--text-2);}
+.progress-track{width:100%;height:8px;background:#f1f3f7;border-radius:var(--radius-pill);overflow:hidden;}
+.progress-fill{height:100%;background:linear-gradient(90deg,#16a34a 0%,#22c55e 80%,#4ade80 100%);border-radius:var(--radius-pill);box-shadow:0 0 10px var(--green-glow);}
+
+/* Status pill */
+.status-pill{display:flex;align-items:center;gap:8px;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-pill);padding:7px 14px;box-shadow:var(--shadow-xs);}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.status-dot.green{background:#22c55e;}
+.status-dot.amber{background:#f59e0b;}
+.status-dot.grey{background:#9ca3af;}
+.status-msg{font-size:12.5px;font-weight:500;color:var(--text-2);}
+
+/* Page check */
+.page-check{display:flex;align-items:center;gap:13px;padding:13px 15px;border-radius:var(--radius);border:1.5px solid;}
+.page-check.ready{background:var(--green-soft);border-color:#bbf7d0;color:var(--green);}
+.page-check.not-ready{background:var(--red-soft);border-color:#fecaca;color:#dc2626;}
+.page-check-icon{font-size:26px;flex-shrink:0;}
+.page-check-title{display:block;font-size:13px;font-weight:700;}
+.page-check-desc{display:block;font-size:11px;opacity:.75;}
+
+/* Notice */
+.notice-card{background:var(--surface);border:1.5px solid var(--border);border-left:3px solid var(--red);border-radius:var(--radius);padding:12px 14px;}
+.notice-title{font-size:11.5px;font-weight:700;color:var(--text-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;}
+.notice-list{list-style:none;display:flex;flex-direction:column;gap:5px;}
+.notice-list li{font-size:12px;color:var(--text-2);padding-left:14px;position:relative;line-height:1.5;}
+.notice-list li::before{content:'›';position:absolute;left:2px;color:var(--red);font-weight:800;font-size:14px;line-height:1.2;}
+</style>
+</head>
+<body>
+
+<!-- ══════════ SCREEN 1: Tab Sửa Giờ — Trạng thái mặc định ══════════ -->
+<div>
+<p class="section-label">1 · Tab Sửa Giờ – Mặc định</p>
+<div class="popup" id="screen1">
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-logo">📦</div>
+      <div class="header-titles">
+        <span class="header-title">VTP TOOL</span>
+        <span class="header-subtitle">All-in-One Automation</span>
+      </div>
+    </div>
+    <span class="header-version">v1.0</span>
+  </header>
+  <nav class="tabs">
+    <button class="tab-btn active"><span class="tab-icon">🕒</span><span class="tab-label">Sửa Giờ</span></button>
+    <button class="tab-btn"><span class="tab-icon">📦</span><span class="tab-label">Kiểm Tồn</span></button>
+  </nav>
+  <div class="tab-content">
+    <div class="field-group">
+      <label class="field-label"><span>📋</span> Danh sách mã vận đơn</label>
+      <textarea class="field-textarea" placeholder="Dán các mã vận đơn vào đây&#10;Mỗi mã một dòng..."></textarea>
+      <div class="field-hint">Chưa có mã nào</div>
+    </div>
+    <div class="delay-card">
+      <div class="delay-info">
+        <span class="delay-emoji">⏱️</span>
+        <div><span class="delay-label">Độ trễ tĩnh</span><span class="delay-desc">Giây chờ sau khi web tải xong</span></div>
+      </div>
+      <div class="delay-control">
+        <button class="stepper-btn">−</button>
+        <input type="number" class="delay-input" value="4">
+        <button class="stepper-btn">+</button>
+      </div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary"><span>▶</span> Bắt Đầu Chạy</button>
+      <button class="btn btn-ghost"><span>⏹</span> Dừng</button>
+    </div>
+    <div class="status-pill">
+      <span class="status-dot green"></span>
+      <span class="status-msg">Sẵn sàng</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 2: Tab Sửa Giờ — Đang chạy ══════════ -->
+<div>
+<p class="section-label">2 · Tab Sửa Giờ – Đang xử lý</p>
+<div class="popup" id="screen2">
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-logo">📦</div>
+      <div class="header-titles">
+        <span class="header-title">VTP TOOL</span>
+        <span class="header-subtitle">All-in-One Automation</span>
+      </div>
+    </div>
+    <span class="header-version">v1.0</span>
+  </header>
+  <nav class="tabs">
+    <button class="tab-btn active"><span class="tab-icon">🕒</span><span class="tab-label">Sửa Giờ</span></button>
+    <button class="tab-btn"><span class="tab-icon">📦</span><span class="tab-label">Kiểm Tồn</span></button>
+  </nav>
+  <div class="tab-content">
+    <div class="field-group">
+      <label class="field-label"><span>📋</span> Danh sách mã vận đơn</label>
+      <textarea class="field-textarea">VTP123456789
+VTP987654321
+VTP112233445
+VTP556677889
+VTP001122334</textarea>
+      <div class="field-hint hint-active">5 mã</div>
+    </div>
+    <div class="delay-card">
+      <div class="delay-info">
+        <span class="delay-emoji">⏱️</span>
+        <div><span class="delay-label">Độ trễ tĩnh</span><span class="delay-desc">Giây chờ sau khi web tải xong</span></div>
+      </div>
+      <div class="delay-control">
+        <button class="stepper-btn">−</button>
+        <input type="number" class="delay-input" value="4">
+        <button class="stepper-btn">+</button>
+      </div>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary"><span>▶</span> Bắt Đầu Chạy</button>
+      <button class="btn btn-ghost"><span>⏹</span> Dừng</button>
+    </div>
+    <div class="progress-card">
+      <div class="progress-meta">
+        <span class="progress-label">Tiến trình</span>
+        <span class="progress-pct">3 / 5 (60%)</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" style="width:60%"></div>
+      </div>
+    </div>
+    <div class="status-pill">
+      <span class="status-dot amber"></span>
+      <span class="status-msg">Đang xử lý đơn 4 / 5…</span>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 3: Tab Kiểm Tồn — Chưa sẵn sàng ══════════ -->
+<div>
+<p class="section-label">3 · Tab Kiểm Tồn – Chưa mở VTP</p>
+<div class="popup" id="screen3">
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-logo">📦</div>
+      <div class="header-titles">
+        <span class="header-title">VTP TOOL</span>
+        <span class="header-subtitle">All-in-One Automation</span>
+      </div>
+    </div>
+    <span class="header-version">v1.0</span>
+  </header>
+  <nav class="tabs">
+    <button class="tab-btn"><span class="tab-icon">🕒</span><span class="tab-label">Sửa Giờ</span></button>
+    <button class="tab-btn active"><span class="tab-icon">📦</span><span class="tab-label">Kiểm Tồn</span></button>
+  </nav>
+  <div class="tab-content">
+    <div class="page-check not-ready">
+      <span class="page-check-icon">⚠️</span>
+      <div>
+        <span class="page-check-title">Chưa sẵn sàng</span>
+        <span class="page-check-desc">Vui lòng mở trang ViettelPost!</span>
+      </div>
+    </div>
+    <button class="btn btn-full" disabled>🚀 CHẠY KIỂM TỒN</button>
+    <div class="notice-card">
+      <p class="notice-title">⚡ Lưu ý quan trọng</p>
+      <ul class="notice-list">
+        <li>Phải mở trang ViettelPost trước khi chạy</li>
+        <li>Không thao tác chuột / bàn phím khi tool đang chạy</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ══════════ SCREEN 4: Tab Kiểm Tồn — Sẵn sàng ══════════ -->
+<div>
+<p class="section-label">4 · Tab Kiểm Tồn – Sẵn sàng</p>
+<div class="popup" id="screen4">
+  <header class="app-header">
+    <div class="header-brand">
+      <div class="header-logo">📦</div>
+      <div class="header-titles">
+        <span class="header-title">VTP TOOL</span>
+        <span class="header-subtitle">All-in-One Automation</span>
+      </div>
+    </div>
+    <span class="header-version">v1.0</span>
+  </header>
+  <nav class="tabs">
+    <button class="tab-btn"><span class="tab-icon">🕒</span><span class="tab-label">Sửa Giờ</span></button>
+    <button class="tab-btn active"><span class="tab-icon">📦</span><span class="tab-label">Kiểm Tồn</span></button>
+  </nav>
+  <div class="tab-content">
+    <div class="page-check ready">
+      <span class="page-check-icon">✅</span>
+      <div>
+        <span class="page-check-title">Sẵn sàng hoạt động</span>
+        <span class="page-check-desc">Trang ViettelPost đã được phát hiện</span>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full">🚀 CHẠY KIỂM TỒN</button>
+    <div class="notice-card">
+      <p class="notice-title">⚡ Lưu ý quan trọng</p>
+      <ul class="notice-list">
+        <li>Phải mở trang ViettelPost trước khi chạy</li>
+        <li>Không thao tác chuột / bàn phím khi tool đang chạy</li>
+      </ul>
+    </div>
+  </div>
+</div>
+</div>
+
+</body>
+</html>
