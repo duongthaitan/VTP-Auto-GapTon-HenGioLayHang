@@ -15,23 +15,23 @@
     <header class="app-header">
         <div class="header-brand">
             <div class="header-logo">
-                <img src="icon48.png" alt="VTP" width="26" height="26">
+                <img src="icon48.png" alt="VTP" width="24" height="24">
             </div>
             <div class="header-titles">
-                <span class="header-title">VTP TOOL</span>
-                <span class="header-subtitle">All-in-One Automation</span>
+                <span class="header-title">VTP <span>TOOL</span></span>
+                <span class="header-subtitle">All-in-One Automation v1.2</span>
             </div>
         </div>
-        <span class="header-version">v1.1</span>
+        <span class="header-version">v1.2</span>
     </header>
 
     <!-- ═══ TABS ═══ -->
     <nav class="tabs">
-        <button class="tab-btn active" data-target="tab-chinhgio">
+        <button class="tab-btn active" data-target="tab-chinhgio" id="tabBtnChinhGio">
             <span class="tab-icon">🕒</span>
             <span class="tab-label">Sửa Giờ</span>
         </button>
-        <button class="tab-btn" data-target="tab-gapton">
+        <button class="tab-btn" data-target="tab-gapton" id="tabBtnGapTon">
             <span class="tab-icon">📦</span>
             <span class="tab-label">Kiểm Tồn</span>
         </button>
@@ -40,21 +40,25 @@
     <!-- ═══ TAB 1: SỬA GIỜ ═══ -->
     <section id="tab-chinhgio" class="tab-content active">
 
+        <!-- Danh sách mã -->
         <div class="field-group">
             <label class="field-label" for="billList">
-                <span>📋</span> Danh sách mã vận đơn
+                <span class="field-label-text">📋 Mã vận đơn</span>
+                <span class="field-hint" id="billCount">Chưa có mã nào</span>
             </label>
-            <textarea
-                id="billList"
-                class="field-textarea"
-                placeholder="Dán các mã vận đơn vào đây&#10;Mỗi mã một dòng...​"
-            ></textarea>
-            <div class="field-hint" id="billCount">Chưa có mã nào</div>
+            <div class="textarea-wrap">
+                <textarea
+                    id="billList"
+                    class="field-textarea"
+                    placeholder="Dán các mã vận đơn vào đây&#10;Mỗi mã một dòng..."
+                ></textarea>
+            </div>
         </div>
 
+        <!-- Delay -->
         <div class="delay-card">
             <div class="delay-info">
-                <span class="delay-emoji">⏱️</span>
+                <div class="delay-icon-wrap">⏱️</div>
                 <div>
                     <span class="delay-label">Độ trễ tĩnh</span>
                     <span class="delay-desc">Giây chờ sau khi web tải xong</span>
@@ -67,15 +71,19 @@
             </div>
         </div>
 
+        <!-- Action Buttons -->
         <div class="action-row">
             <button id="startChinhGioBtn" class="btn btn-primary">
-                <span>▶</span> Bắt Đầu Chạy
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><polygon points="2,1 11,6 2,11"/></svg>
+                Bắt Đầu Chạy
             </button>
             <button id="stopChinhGioBtn" class="btn btn-ghost" title="Dừng lại">
-                <span>⏹</span> Dừng
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor"><rect x="1" y="1" width="9" height="9" rx="1.5"/></svg>
+                Dừng
             </button>
         </div>
 
+        <!-- Progress -->
         <div class="progress-card" id="progressContainer">
             <div class="progress-meta">
                 <span class="progress-label">Tiến trình</span>
@@ -86,6 +94,7 @@
             </div>
         </div>
 
+        <!-- Status -->
         <div class="status-pill" id="statusChinhGio">
             <span class="status-dot"></span>
             <span class="status-msg">Sẵn sàng</span>
@@ -96,18 +105,22 @@
     <!-- ═══ TAB 2: KIỂM TỒN ═══ -->
     <section id="tab-gapton" class="tab-content">
 
+        <!-- Trạng thái trang -->
         <div id="statusBoxGapTon" class="page-check not-ready">
             <span class="page-check-icon">⚠️</span>
             <div class="page-check-body">
                 <span class="page-check-title">Chưa sẵn sàng</span>
                 <span class="page-check-desc">Đang kiểm tra trang web...</span>
             </div>
+            <span class="page-check-dot"></span>
         </div>
 
-        <button id="startGapTonBtn" class="btn btn-primary btn-full" disabled>
-            🚀 CHẠY KIỂM TỒN
+        <!-- Nút chạy chính -->
+        <button id="startGapTonBtn" class="btn-launch" disabled>
+            🚀 &nbsp;CHẠY KIỂM TỒN
         </button>
 
+        <!-- Lưu ý -->
         <div class="notice-card">
             <p class="notice-title">⚡ Lưu ý quan trọng</p>
             <ul class="notice-list">

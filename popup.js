@@ -1,6 +1,6 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v1.1 Fixes:
+//  v1.2 Fixes:
 //    - Fix inject trùng: disable nút Start ngay khi click
 //    - Fix storage.onChanged: đọc giá trị trực tiếp từ `changes`, không gọi storage.get() lồng
 //    - Fix delay restore: lưu và restore giá trị delay từ storage
@@ -222,7 +222,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // Disable button ngay để tránh inject trùng
         startGapTonBtn.disabled    = true;
-        startGapTonBtn.textContent = '⏳ Đang nạp hệ thống…';
+        startGapTonBtn.textContent  = '⏳  Đang nạp hệ thống…';
 
         try {
             await chrome.scripting.executeScript({
@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.error('[VTP] Lỗi inject script Kiểm Tồn:', e);
             alert('Không thể chạy script. Hãy kiểm tra lại trang ViettelPost!');
             startGapTonBtn.disabled    = false;
-            startGapTonBtn.textContent = '🚀 CHẠY KIỂM TỒN';
+            startGapTonBtn.textContent = '🚀  CHẠY KIỂM TỒN';
             return;
         }
 
