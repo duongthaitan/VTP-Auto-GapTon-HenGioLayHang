@@ -157,8 +157,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         // Fix inject trùng: Disable ngay lập tức trước khi inject
-        startChinhGioBtn.disabled    = true;
-        startChinhGioBtn.textContent = '⏳ Đang chạy…';
+        startChinhGioBtn.disabled  = true;
+        startChinhGioBtn.innerHTML = '⏳ Đang chạy…';
 
         await chrome.storage.local.set({
             billList:     bills,
@@ -177,8 +177,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             console.error('[VTP] Lỗi inject script:', e);
             await chrome.storage.local.set({ isRunning: false });
             // Re-enable nút nếu lỗi
-            startChinhGioBtn.disabled    = false;
-            startChinhGioBtn.textContent = '▶ Bắt Đầu Chạy';
+            startChinhGioBtn.disabled  = false;
+            startChinhGioBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><polygon points="4,2 16,10 4,18"/></svg> Bắt Đầu Chạy';
             alert('Không thể chạy script. Hãy đảm bảo bạn đang mở đúng trang ViettelPost!');
         }
     });
@@ -187,8 +187,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         await chrome.storage.local.set({ isRunning: false });
         if (statusMsg) statusMsg.textContent      = 'Đã dừng.';
         if (statusDot) statusDot.style.background = '#6b7280';
-        startChinhGioBtn.disabled    = false;
-        startChinhGioBtn.textContent = '▶ Bắt Đầu Chạy';
+        startChinhGioBtn.disabled  = false;
+        startChinhGioBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><polygon points="4,2 16,10 4,18"/></svg> Bắt Đầu Chạy';
     });
 
     // ════════════════════════════════════════
@@ -407,11 +407,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         } finally {
             loadRoutesBtn.disabled = false;
             loadRoutesBtn.innerHTML = `
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M21 12a9 9 0 11-3.36-7.02"/>
-                    <polyline points="21 3 21 9 15 9"/>
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15">
+                    <polyline points="19 3.5 19 8.5 14 8.5"/>
+                    <polyline points="1 16.5 1 11.5 6 11.5"/>
+                    <path d="M3 7.5a7.5 7.5 0 0 1 12.19-2.78L19 8.5M1 11.5l3.81 3.78A7.5 7.5 0 0 0 17 12.5"/>
                 </svg>
-                Tải danh sách tuyến từ trang VTP`;
+                Tải danh sách tuyến từ VTP`;
         }
     });
 
@@ -437,8 +438,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectedRoutes.length === 0) { alert('Vui lòng chọn ít nhất 1 tuyến!'); return; }
 
         // Disable UI
-        startKiemKeTuyenBtn.disabled    = true;
-        startKiemKeTuyenBtn.textContent = '⏳  Đang kiểm kê...';
+        startKiemKeTuyenBtn.disabled  = true;
+        startKiemKeTuyenBtn.innerHTML = '⏳ Đang kiểm kê...';
         loadRoutesBtn.disabled          = true;
         startGapTonBtn.disabled         = true;
 
@@ -649,10 +650,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 `⚠️ Hoàn tất ${completed} tuyến. ${errors.length} lỗi: ${errors.map(e => e.route).join(', ')}`;
         }
 
-        startKiemKeTuyenBtn.disabled    = false;
-        startKiemKeTuyenBtn.textContent = '🚀  CHẠY KIỂM KÊ TUYẾN';
-        loadRoutesBtn.disabled          = false;
-        startGapTonBtn.disabled         = false;
+        startKiemKeTuyenBtn.disabled  = false;
+        startKiemKeTuyenBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><polygon points="4 2.5 16 10 4 17.5 4 2.5"/></svg> Chạy Kiểm Kê Tự Động';
+        loadRoutesBtn.disabled        = false;
+        startGapTonBtn.disabled       = false;
     });
 
     // ════════════════════════════════════════
@@ -662,8 +663,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab?.url?.includes('viettelpost') && !tab?.url?.includes('localhost')) return;
 
-        startGapTonBtn.disabled    = true;
-        startGapTonBtn.textContent = '⏳  Đang nạp hệ thống…';
+        startGapTonBtn.disabled  = true;
+        startGapTonBtn.innerHTML = '⏳ Đang nạp hệ thống…';
 
         try {
             await chrome.scripting.executeScript({
@@ -674,8 +675,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (e) {
             console.error('[VTP] Lỗi inject Kiểm Tồn:', e);
             alert('Không thể chạy script. Hãy kiểm tra lại trang ViettelPost!');
-            startGapTonBtn.disabled    = false;
-            startGapTonBtn.textContent = '📦  QUÉT MÃ KIỂM TỒN';
+            startGapTonBtn.disabled  = false;
+            startGapTonBtn.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15"><path d="M17.5 13.3V6.7a1.7 1.7 0 00-.83-1.44L10.83 1.9a1.7 1.7 0 00-1.66 0L3.33 5.26A1.7 1.7 0 002.5 6.7v6.6a1.7 1.7 0 00.83 1.44l5.84 3.36a1.7 1.7 0 001.66 0l5.84-3.36A1.7 1.7 0 0017.5 13.3z"/></svg> Quét Mã Kiểm Tồn';
             return;
         }
 
