@@ -1,11 +1,11 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v1.2 Fixes:
-//    - Fix inject trùng: disable nút Start ngay khi click
-//    - Fix storage.onChanged: đọc giá trị trực tiếp từ `changes`, không gọi storage.get() lồng
-//    - Fix delay restore: lưu và restore giá trị delay từ storage
-//    - Fix debounce updateBillCount: tránh re-render khi paste dữ liệu lớn
-//    - Fix GapTon button: disable khi đang chạy
+//  v1.4 Changes:
+//    - Thêm chức năng chọn tuyến kiểm kê (checklist)
+//    - Load danh sách tuyến từ combobox trên trang VTP
+//    - Sau kiểm kê tuyến (5 bước), tự động inject gapton_core_scan
+//    - Sau scan xong: F5 trang → chờ về trang danh sách → tuyến kế tiếp
+//    - Giữ nguyên chức năng quét mã cũ
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
 
@@ -194,20 +194,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ════════════════════════════════════════
     //  TAB 2 — KIỂM TỒN
     // ════════════════════════════════════════
-    const statusBoxGapTon = document.getElementById('statusBoxGapTon');
-    const startGapTonBtn  = document.getElementById('startGapTonBtn');
+    const statusBoxGapTon       = document.getElementById('statusBoxGapTon');
+    const startGapTonBtn        = document.getElementById('startGapTonBtn');
+    const loadRoutesBtn         = document.getElementById('loadRoutesBtn');
+    const routeChecklist        = document.getElementById('routeChecklist');
+    const routeSelectAllWrap    = document.getElementById('routeSelectAllWrap');
+    const routeSelectAllCb      = document.getElementById('routeSelectAll');
+    const routeCounterEl        = document.getElementById('routeCounter');
+    const startKiemKeTuyenBtn   = document.getElementById('startKiemKeTuyenBtn');
+    const routeProgressCard     = document.getElementById('routeProgressCard');
+    const routeProgressBar      = document.getElementById('routeProgressBar');
+    const routeProgressPct      = document.getElementById('routeProgressPct');
+    const routeProgressStatus   = document.getElementById('routeProgressStatus');
+
+    let loadedRoutes = []; // Danh sách tuyến đã load
 
     function setGapTonStatus(isReady, title, desc) {
         statusBoxGapTon.className                                       = `page-check ${isReady ? 'ready' : 'not-ready'}`;
         statusBoxGapTon.querySelector('.page-check-icon').textContent   = isReady ? '✅' : '⚠️';
         statusBoxGapTon.querySelector('.page-check-title').textContent  = title;
         statusBoxGapTon.querySelector('.page-check-desc').textContent   = desc;
-        startGapTonBtn.disabled = !isReady;
+        startGapTonBtn.disabled      = !isReady;
+        loadRoutesBtn.disabled       = !isReady;
     }
 
     try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tab?.url?.includes('viettelpost')) {
+        if (tab?.url?.includes('viettelpost') || tab?.url?.includes('localhost')) {
             setGapTonStatus(true, 'Sẵn sàng hoạt động', 'Trang ViettelPost đã được phát hiện');
         } else {
             setGapTonStatus(false, 'Chưa sẵn sàng', 'Vui lòng mở trang ViettelPost!');
@@ -216,13 +229,438 @@ document.addEventListener('DOMContentLoaded', async () => {
         setGapTonStatus(false, 'Lỗi xác định trang', err.message);
     }
 
+    // ── Cập nhật số tuyến đã chọn ──
+    function updateSelectedCount() {
+        const checked = routeChecklist.querySelectorAll('.route-item-cb:checked');
+        const count   = checked.length;
+        routeCounterEl.textContent = `${count} tuyến`;
+        startKiemKeTuyenBtn.disabled = count === 0;
+
+        // Cập nhật select all checkbox state
+        if (loadedRoutes.length > 0) {
+            routeSelectAllCb.checked       = (count === loadedRoutes.length);
+            routeSelectAllCb.indeterminate = (count > 0 && count < loadedRoutes.length);
+        }
+
+        // Toggle class is-checked trên items
+        routeChecklist.querySelectorAll('.route-item').forEach(item => {
+            const cb = item.querySelector('.route-item-cb');
+            if (cb) item.classList.toggle('is-checked', cb.checked);
+        });
+    }
+
+    // ── Render checklist từ danh sách tuyến ──
+    function renderRouteChecklist(routes) {
+        loadedRoutes = routes;
+        routeChecklist.innerHTML = '';
+
+        if (routes.length === 0) {
+            routeChecklist.innerHTML = `
+                <div class="route-empty-state">
+                    <span class="route-empty-icon">🔍</span>
+                    <span class="route-empty-text">Không tìm thấy tuyến nào</span>
+                    <span class="route-empty-hint">Đảm bảo đang ở trang kiểm kê bưu phẩm</span>
+                </div>`;
+            routeSelectAllWrap.style.display = 'none';
+            startKiemKeTuyenBtn.disabled = true;
+            return;
+        }
+
+        routeSelectAllWrap.style.display = 'block';
+
+        const frag = document.createDocumentFragment();
+        routes.forEach((route, idx) => {
+            const item = document.createElement('div');
+            item.className = 'route-item';
+            item.innerHTML = `
+                <label class="route-checkbox-label" style="width:100%;">
+                    <input type="checkbox" class="route-checkbox route-item-cb" data-index="${idx}" data-route="${route}">
+                    <span class="route-checkbox-custom"></span>
+                    <span class="route-item-text">${route}</span>
+                </label>`;
+
+            // Click handler
+            const cb = item.querySelector('.route-item-cb');
+            cb.addEventListener('change', updateSelectedCount);
+            frag.appendChild(item);
+        });
+
+        routeChecklist.appendChild(frag);
+        updateSelectedCount();
+    }
+
+    // ── Select All toggle ──
+    routeSelectAllCb.addEventListener('change', () => {
+        const isChecked = routeSelectAllCb.checked;
+        routeChecklist.querySelectorAll('.route-item-cb').forEach(cb => {
+            cb.checked = isChecked;
+        });
+        updateSelectedCount();
+    });
+
+    // ── Load Routes — inject script vào trang VTP để đọc combobox ──
+    loadRoutesBtn.addEventListener('click', async () => {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.url?.includes('viettelpost') && !tab?.url?.includes('localhost')) {
+            alert('Vui lòng mở trang ViettelPost kiểm kê trước!');
+            return;
+        }
+
+        loadRoutesBtn.disabled = true;
+        loadRoutesBtn.innerHTML = `
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation: spin 1s linear infinite;">
+                <path d="M21 12a9 9 0 11-3.36-7.02"/>
+                <polyline points="21 3 21 9 15 9"/>
+            </svg>
+            Đang tải...`;
+
+        try {
+            // Inject script để đọc combobox trên trang VTP
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                world: 'MAIN',
+                func: () => {
+                    // Bước 1: Tìm combobox kiểm kê
+                    const comboboxes = document.querySelectorAll('.z-combobox');
+                    let targetCombobox = null;
+
+                    for (const cb of comboboxes) {
+                        const input = cb.querySelector('.z-combobox-input');
+                        if (input) {
+                            const placeholder = input.getAttribute('placeholder') || '';
+                            const value = input.value || '';
+                            if (placeholder.includes('Hình thức kiểm kê') ||
+                                value.includes('Kiểm kê') ||
+                                value.includes('kiểm kê') ||
+                                value.includes('Kiểm') ||
+                                value.includes('bưu cục')) {
+                                targetCombobox = cb;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!targetCombobox) {
+                        // Fallback: lấy combobox đầu tiên
+                        for (const cb of comboboxes) {
+                            if (cb.querySelector('.z-combobox-input')) {
+                                targetCombobox = cb;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!targetCombobox) return { error: 'Không tìm thấy ô chọn hình thức kiểm kê!' };
+
+                    // Bước 2: Click mở dropdown
+                    const dropdownBtn = targetCombobox.querySelector('.z-combobox-button');
+                    if (dropdownBtn) dropdownBtn.click();
+
+                    // Bước 3: Chờ nhỏ rồi đọc items
+                    return new Promise(resolve => {
+                        setTimeout(() => {
+                            const routes = [];
+                            const popups = document.querySelectorAll('.z-combobox-popup');
+
+                            for (const popup of popups) {
+                                if (popup.style.display === 'none' || popup.offsetHeight === 0) continue;
+                                const items = popup.querySelectorAll('.z-comboitem');
+                                items.forEach(item => {
+                                    const textEl = item.querySelector('.z-comboitem-text');
+                                    if (textEl) {
+                                        const text = textEl.textContent.replace(/\u00A0/g, ' ').trim();
+                                        if (text) routes.push(text);
+                                    }
+                                });
+                                if (routes.length > 0) break;
+                            }
+
+                            // Đóng dropdown (click lại hoặc click body)
+                            if (dropdownBtn) dropdownBtn.click();
+
+                            resolve({ routes });
+                        }, 1500);
+                    });
+                }
+            });
+
+            const data = results?.[0]?.result;
+            if (data?.error) {
+                alert(data.error);
+                return;
+            }
+
+            const routes = data?.routes || [];
+            if (routes.length === 0) {
+                alert('Không tìm thấy tuyến nào! Đảm bảo bạn đang ở trang kiểm kê bưu phẩm.');
+                return;
+            }
+
+            renderRouteChecklist(routes);
+
+        } catch (e) {
+            console.error('[VTP] Lỗi load routes:', e);
+            alert('Lỗi khi tải danh sách tuyến: ' + e.message);
+        } finally {
+            loadRoutesBtn.disabled = false;
+            loadRoutesBtn.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 11-3.36-7.02"/>
+                    <polyline points="21 3 21 9 15 9"/>
+                </svg>
+                Tải danh sách tuyến từ trang VTP`;
+        }
+    });
+
+    // ════════════════════════════════════════
+    //  CHẠY KIỂM KÊ TUYẾN
+    //  Luồng mỗi tuyến:
+    //   A) Set __VTP_SELECTED_ROUTE__
+    //   B) Đăng ký waitForScanPage() TRƯỚC khi inject
+    //   C) Inject kiemke_tuyen_auto.js (5 bước)
+    //   D) Chờ trang scan mở (URL change hoặc input.clsinputpg xuất hiện)
+    //   E) Inject gapton_core_scan.js → quét tự động
+    //   F) Poll __VTP_SCAN_COMPLETE__ chờ scan xong
+    //   G) Navigate về trang danh sách → lặp tuyến kế tiếp
+    // ════════════════════════════════════════
+    startKiemKeTuyenBtn.addEventListener('click', async () => {
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.url?.includes('viettelpost') && !tab?.url?.includes('localhost')) return;
+
+        const selectedRoutes = [];
+        routeChecklist.querySelectorAll('.route-item-cb:checked').forEach(cb => {
+            selectedRoutes.push(cb.getAttribute('data-route'));
+        });
+        if (selectedRoutes.length === 0) { alert('Vui lòng chọn ít nhất 1 tuyến!'); return; }
+
+        // Disable UI
+        startKiemKeTuyenBtn.disabled    = true;
+        startKiemKeTuyenBtn.textContent = '⏳  Đang kiểm kê...';
+        loadRoutesBtn.disabled          = true;
+        startGapTonBtn.disabled         = true;
+
+        routeProgressCard.style.display = 'block';
+        routeProgressBar.style.width    = '0%';
+        routeProgressPct.textContent    = `0 / ${selectedRoutes.length}`;
+
+        let completed = 0;
+        let errors    = [];
+
+        // ── Helper: poll biến global trên trang ──
+        function pollPageVar(tabId, varName, intervalMs, timeoutMs) {
+            return new Promise((resolve) => {
+                const start = Date.now();
+                const check = async () => {
+                    try {
+                        const res = await chrome.scripting.executeScript({
+                            target: { tabId }, world: 'MAIN',
+                            func: (v) => window[v] || null, args: [varName]
+                        });
+                        const val = res?.[0]?.result;
+                        if (val) { resolve(val); return; }
+                    } catch (_) { /* tab đang navigate – bỏ qua */ }
+                    if (Date.now() - start >= timeoutMs) { resolve(null); return; }
+                    setTimeout(check, intervalMs);
+                };
+                setTimeout(check, intervalMs);
+            });
+        }
+
+        // ── Helper: xóa biến global trên trang ──
+        async function clearPageVar(tabId, varName) {
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId }, world: 'MAIN',
+                    func: (v) => { delete window[v]; }, args: [varName]
+                });
+            } catch (_) {}
+        }
+
+        // ♥ HELPER MỚI: chờ trang scan mở (hỗ trợ cả full-nav và SPA)
+        //   • Full-nav: URL thay đổi và tab status = complete
+        //   • SPA     : URL giữ nguyên nhưng input.clsinputpg xuất hiện
+        function waitForScanPage(tabId, urlBefore, timeoutMs = 90000) {
+            return new Promise((resolve) => {
+                let done = false;
+                function finish(val) {
+                    if (done) return; done = true;
+                    clearTimeout(deadline);
+                    clearInterval(spaPoller);
+                    chrome.tabs.onUpdated.removeListener(navListener);
+                    resolve(val);
+                }
+                const deadline = setTimeout(() => finish(false), timeoutMs);
+
+                // Chế độ 1: Full-nav – URL thay đổi
+                const navListener = (tid, changeInfo, updatedTab) => {
+                    if (tid !== tabId || changeInfo.status !== 'complete') return;
+                    const newUrl = updatedTab.url || '';
+                    if (newUrl && newUrl !== urlBefore) {
+                        console.log('[VTP] ♥ Tab navigated:', newUrl);
+                        finish(true);
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(navListener);
+
+                // Chế độ 2: SPA – poll input.clsinputpg
+                const spaPoller = setInterval(async () => {
+                    try {
+                        const res = await chrome.scripting.executeScript({
+                            target: { tabId }, world: 'MAIN',
+                            func: () => !!document.querySelector('input.clsinputpg')
+                        });
+                        if (res?.[0]?.result === true) {
+                            console.log('[VTP] ♥ SPA: input.clsinputpg xuất hiện');
+                            finish(true);
+                        }
+                    } catch (_) {} // tab đang navigate
+                }, 1200);
+            });
+        }
+
+        // ── Helper: chờ tab reload hoàn tất ──
+        function waitForTabReload(tabId, urlKeyword, timeoutMs = 30000) {
+            return new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    chrome.tabs.onUpdated.removeListener(listener); resolve(false);
+                }, timeoutMs);
+                const listener = (tid, changeInfo, updated) => {
+                    if (tid !== tabId || changeInfo.status !== 'complete') return;
+                    if (!urlKeyword || (updated.url || '').includes(urlKeyword)) {
+                        clearTimeout(timer);
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve(true);
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+            });
+        }
+
+        // ════════════════════════════════════════
+        //  VÒNG LẶP CHÍNH — từng tuyến
+        // ════════════════════════════════════════
+        for (let i = 0; i < selectedRoutes.length; i++) {
+            const route = selectedRoutes[i];
+            routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Kiểm kê: ${route}`;
+
+            try {
+                // A: Set route + clear flags
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id }, world: 'MAIN',
+                    func: (name) => {
+                        window.__VTP_SELECTED_ROUTE__ = name;
+                        window.__VTP_SCAN_COMPLETE__  = null;
+                        window.__VTP_5STEPS_DONE__    = null;
+                    },
+                    args: [route]
+                });
+
+                // B: Lấy URL hiện tại trước khi inject
+                const tabInfo   = await chrome.tabs.get(tab.id);
+                const urlBefore = tabInfo.url;
+                console.log('[VTP] URL trước inject:', urlBefore);
+
+                // C: Đăng ký waitForScanPage TRƯỚC khi inject
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Thực hiện 5 bước: ${route}`;
+                const scanPagePromise = waitForScanPage(tab.id, urlBefore, 90000);
+
+                // D: Inject kiemke_tuyen_auto (5 bước)
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id }, world: 'MAIN',
+                    files: ['notification.js', 'kiemke_tuyen_auto.js']
+                });
+
+                // E: Chờ trang scan mở (URL change hoặc SPA input.clsinputpg)
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ trang kiểm kê mở...`;
+                const scanPageReady = await scanPagePromise;
+                if (!scanPageReady) {
+                    throw new Error('Không vào được trang kiểm kê sau 90 giây');
+                }
+                console.log('[VTP] ✅ Trang scan đã mở');
+
+                // Buffer nhỏ để trang render đầy đủ
+                await new Promise(r => setTimeout(r, 2500));
+
+                // F: Inject gapton_core_scan
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
+                console.log('[VTP] Inject gapton_core_scan.js...');
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id }, world: 'MAIN',
+                    files: ['notification.js', 'gapton_settings.js', 'gapton_smart_delay.js', 'gapton_core_scan.js']
+                });
+
+                // G: Poll __VTP_SCAN_COMPLETE__ (timeout 30 phút)
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ quét xong: ${route}...`;
+                console.log('[VTP] Chờ __VTP_SCAN_COMPLETE__...');
+                const scanDone = await pollPageVar(tab.id, '__VTP_SCAN_COMPLETE__', 3000, 1800000);
+                await clearPageVar(tab.id, '__VTP_SCAN_COMPLETE__');
+
+                if (!scanDone) {
+                    console.warn('[VTP] Scan timeout tuyến:', route);
+                    errors.push({ route, error: 'Scan timeout' });
+                } else {
+                    console.log('[VTP] ✅ Scan xong:', route);
+                }
+
+                // H: Navigate về trang danh sách
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Tải lại trang...`;
+                const reloadPromise = waitForTabReload(tab.id, '', 30000);
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id }, world: 'MAIN',
+                    func: () => {
+                        // Mock localhost: navigate về trang danh sách
+                        if (location.hostname === 'localhost') {
+                            location.href = '/viettelpost/kiem-ke-buu-pham';
+                        } else {
+                            // VTP thật (SPA): reload cả trang
+                            location.reload();
+                        }
+                    }
+                });
+                await reloadPromise;
+                await new Promise(r => setTimeout(r, 3000));
+
+            } catch (e) {
+                console.error(`[VTP] Lỗi tuyến "${route}":`, e);
+                errors.push({ route, error: e.message });
+            }
+
+            // Cập nhật progress
+            completed++;
+            const pct = Math.round((completed / selectedRoutes.length) * 100);
+            routeProgressBar.style.width = pct + '%';
+            routeProgressPct.textContent = `${completed} / ${selectedRoutes.length}`;
+
+            if (i < selectedRoutes.length - 1) {
+                routeProgressStatus.textContent = `✔️ Xong tuyến ${i + 1}. Chuyển tuyến ${i + 2}...`;
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+
+        // Hoàn tất
+        routeProgressBar.style.width = '100%';
+        if (errors.length === 0) {
+            routeProgressStatus.textContent = `✅ Hoàn tất! Đã kiểm kê ${completed} tuyến thành công.`;
+        } else {
+            routeProgressStatus.textContent =
+                `⚠️ Hoàn tất ${completed} tuyến. ${errors.length} lỗi: ${errors.map(e => e.route).join(', ')}`;
+        }
+
+        startKiemKeTuyenBtn.disabled    = false;
+        startKiemKeTuyenBtn.textContent = '🚀  CHẠY KIỂM KÊ TUYẾN';
+        loadRoutesBtn.disabled          = false;
+        startGapTonBtn.disabled         = false;
+    });
+
+    // ════════════════════════════════════════
+    //  NÚT QUÉT MÃ CŨ (Core Scan)
+    // ════════════════════════════════════════
     startGapTonBtn.addEventListener('click', async () => {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!tab?.url?.includes('viettelpost')) return;
+        if (!tab?.url?.includes('viettelpost') && !tab?.url?.includes('localhost')) return;
 
-        // Disable button ngay để tránh inject trùng
         startGapTonBtn.disabled    = true;
-        startGapTonBtn.textContent  = '⏳  Đang nạp hệ thống…';
+        startGapTonBtn.textContent = '⏳  Đang nạp hệ thống…';
 
         try {
             await chrome.scripting.executeScript({
@@ -231,10 +669,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 files:  ['notification.js', 'gapton_settings.js', 'gapton_smart_delay.js', 'gapton_core_scan.js']
             });
         } catch (e) {
-            console.error('[VTP] Lỗi inject script Kiểm Tồn:', e);
+            console.error('[VTP] Lỗi inject Kiểm Tồn:', e);
             alert('Không thể chạy script. Hãy kiểm tra lại trang ViettelPost!');
             startGapTonBtn.disabled    = false;
-            startGapTonBtn.textContent = '🚀  CHẠY KIỂM TỒN';
+            startGapTonBtn.textContent = '📦  QUÉT MÃ KIỂM TỒN';
             return;
         }
 

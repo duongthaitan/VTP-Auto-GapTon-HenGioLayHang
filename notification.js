@@ -2,6 +2,8 @@
 //  VTP Tool – Notification Module
 //  v1.1: Fix timer leak + guard DOM an toàn
 // ============================================================
+
+
 window.VTPNotification = (function () {
     const COLORS = {
         info:    { bg: '#333333', text: '#ffffff' },
@@ -14,6 +16,7 @@ window.VTPNotification = (function () {
     let _fadeOutTimer = null;
     let _removeTimer  = null;
     let _current      = null;
+
 
     function _clear() {
         clearTimeout(_fadeOutTimer);

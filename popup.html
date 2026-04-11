@@ -115,9 +115,69 @@
             <span class="page-check-dot"></span>
         </div>
 
-        <!-- Nút chạy chính -->
-        <button id="startGapTonBtn" class="btn-launch" disabled>
-            🚀 &nbsp;CHẠY KIỂM TỒN
+        <!-- ═══ PHẦN CHỌN TUYẾN ═══ -->
+        <div class="route-section">
+            <div class="route-header">
+                <div class="route-header-left">
+                    <span class="route-header-icon">🚚</span>
+                    <span class="route-header-title">Chọn Tuyến Kiểm Kê</span>
+                </div>
+                <span class="route-counter" id="routeCounter">0 tuyến</span>
+            </div>
+
+            <!-- Nút load tuyến -->
+            <button id="loadRoutesBtn" class="route-load-btn" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 11-3.36-7.02"/>
+                    <polyline points="21 3 21 9 15 9"/>
+                </svg>
+                Tải danh sách tuyến từ trang VTP
+            </button>
+
+            <!-- Select All -->
+            <div class="route-select-all" id="routeSelectAllWrap" style="display:none;">
+                <label class="route-checkbox-label">
+                    <input type="checkbox" id="routeSelectAll" class="route-checkbox">
+                    <span class="route-checkbox-custom"></span>
+                    <span class="route-select-all-text">Chọn tất cả</span>
+                </label>
+            </div>
+
+            <!-- Danh sách tuyến -->
+            <div class="route-checklist" id="routeChecklist">
+                <div class="route-empty-state">
+                    <span class="route-empty-icon">📋</span>
+                    <span class="route-empty-text">Chưa tải danh sách tuyến</span>
+                    <span class="route-empty-hint">Nhấn nút tải ở trên để bắt đầu</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tiến trình kiểm kê tuyến -->
+        <div class="route-progress-card" id="routeProgressCard" style="display:none;">
+            <div class="route-progress-header">
+                <span class="route-progress-label">Tiến trình kiểm kê</span>
+                <span class="route-progress-pct" id="routeProgressPct">0 / 0</span>
+            </div>
+            <div class="route-progress-track">
+                <div class="route-progress-fill" id="routeProgressBar"></div>
+            </div>
+            <div class="route-progress-status" id="routeProgressStatus">Đang chuẩn bị...</div>
+        </div>
+
+        <!-- Nút chạy kiểm kê tuyến -->
+        <button id="startKiemKeTuyenBtn" class="btn-launch" disabled>
+            🚀 &nbsp;CHẠY KIỂM KÊ TUYẾN
+        </button>
+
+        <!-- Divider -->
+        <div class="route-divider">
+            <span class="route-divider-text">hoặc</span>
+        </div>
+
+        <!-- Nút quét mã cũ -->
+        <button id="startGapTonBtn" class="btn-launch-secondary" disabled>
+            📦 &nbsp;QUÉT MÃ KIỂM TỒN
         </button>
 
         <!-- Lưu ý -->
@@ -126,6 +186,7 @@
             <ul class="notice-list">
                 <li>Phải mở trang ViettelPost trước khi chạy</li>
                 <li>Không thao tác chuột / bàn phím khi tool đang chạy</li>
+                <li>Kiểm kê tuyến: chọn tuyến → tool tự động thực hiện 5 bước</li>
             </ul>
         </div>
 

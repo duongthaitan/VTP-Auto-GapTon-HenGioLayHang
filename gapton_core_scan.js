@@ -362,5 +362,9 @@
         statusEl.style.color             = '#155724';
         statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm!`;
         pauseBtn.style.display           = 'none';
+
+        // Báo hiệu cho popup.js biết scan đã xong → popup sẽ F5 và chuyển tuyến tiếp theo
+        window.__VTP_SCAN_COMPLETE__ = true;
+        console.log('[VTP Core Scan] ✅ Scan hoàn tất – đã set __VTP_SCAN_COMPLETE__ = true');
     }
 })();

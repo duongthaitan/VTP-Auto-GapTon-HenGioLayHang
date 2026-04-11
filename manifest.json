@@ -10,7 +10,8 @@
   ],
   "host_permissions": [
     "*://*.viettelpost.vn/*",
-    "*://*.viettelpost.com.vn/*"
+    "*://*.viettelpost.com.vn/*",
+    "http://localhost/*"
   ],
   "icons": {
     "16": "icon16.png",
