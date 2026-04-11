@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     //  TAB SWITCHING
     // ════════════════════════════════════════
     const tabBtns     = document.querySelectorAll('.tab-btn');
-    const tabContents = document.querySelectorAll('.tab-content');
+    const tabContents = document.querySelectorAll('.tab-pane');
 
     tabBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -38,10 +38,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const bills = parseBills();
         if (bills.length > 0) {
             billCountEl.textContent = `${bills.length} mã`;
-            billCountEl.style.color = 'var(--red)';
+            billCountEl.classList.add('has-bills');
         } else {
-            billCountEl.textContent = 'Chưa có mã nào';
-            billCountEl.style.color = 'var(--text-3)';
+            billCountEl.textContent = '0 mã';
+            billCountEl.classList.remove('has-bills');
         }
     }
 
@@ -210,10 +210,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let loadedRoutes = []; // Danh sách tuyến đã load
 
     function setGapTonStatus(isReady, title, desc) {
-        statusBoxGapTon.className                                       = `page-check ${isReady ? 'ready' : 'not-ready'}`;
-        statusBoxGapTon.querySelector('.page-check-icon').textContent   = isReady ? '✅' : '⚠️';
-        statusBoxGapTon.querySelector('.page-check-title').textContent  = title;
-        statusBoxGapTon.querySelector('.page-check-desc').textContent   = desc;
+        statusBoxGapTon.className                                       = `conn-status ${isReady ? 'ready' : 'not-ready'}`;
+        statusBoxGapTon.querySelector('.conn-icon').textContent          = isReady ? '✅' : '⚠️';
+        statusBoxGapTon.querySelector('.conn-title').textContent         = title;
+        statusBoxGapTon.querySelector('.conn-desc').textContent          = desc;
         startGapTonBtn.disabled      = !isReady;
         loadRoutesBtn.disabled       = !isReady;
     }
@@ -256,10 +256,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (routes.length === 0) {
             routeChecklist.innerHTML = `
-                <div class="route-empty-state">
-                    <span class="route-empty-icon">🔍</span>
-                    <span class="route-empty-text">Không tìm thấy tuyến nào</span>
-                    <span class="route-empty-hint">Đảm bảo đang ở trang kiểm kê bưu phẩm</span>
+                <div class="empty-state">
+                    <svg viewBox="0 0 48 48" fill="none" stroke="#D1D5DB" stroke-width="1.5" width="44" height="44">
+                        <rect x="2" y="8" width="28" height="24" rx="3"/>
+                        <path d="M30 14l7.5 0 4 5V32h-11.5V14z"/>
+                        <circle cx="9" cy="36" r="4"/><circle cx="34" cy="36" r="4"/>
+                    </svg>
+                    <p class="empty-title">Không tìm thấy tuyến nào</p>
+                    <p class="empty-hint">Đảm bảo đang ở trang kiểm kê bưu phẩm</p>
                 </div>`;
             routeSelectAllWrap.style.display = 'none';
             startKiemKeTuyenBtn.disabled = true;
@@ -273,13 +277,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             const item = document.createElement('div');
             item.className = 'route-item';
             item.innerHTML = `
-                <label class="route-checkbox-label" style="width:100%;">
-                    <input type="checkbox" class="route-checkbox route-item-cb" data-index="${idx}" data-route="${route}">
-                    <span class="route-checkbox-custom"></span>
+                <label class="checkbox-label" style="width:100%;">
+                    <input type="checkbox" class="cb-input route-item-cb" data-index="${idx}" data-route="${route}">
+                    <span class="cb-box"></span>
                     <span class="route-item-text">${route}</span>
                 </label>`;
 
-            // Click handler
             const cb = item.querySelector('.route-item-cb');
             cb.addEventListener('change', updateSelectedCount);
             frag.appendChild(item);
