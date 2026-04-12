@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VTP Tool All-in-One",
-  "version": "2.1",
+  "version": "3.0",
   "description": "Tích hợp Auto Sửa Giờ và Auto Quét Kiểm Tồn ViettelPost",
   "permissions": [
     "activeTab",
@@ -16,20 +16,20 @@
     "http://localhost/*"
   ],
   "icons": {
-    "16": "icon16.png",
-    "48": "icon48.png",
-    "128": "icon128.png"
+    "16":  "assets/icons/icon16.png",
+    "48":  "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
   },
   "action": {
     "default_icon": {
-      "16": "icon16.png",
-      "48": "icon48.png",
-      "128": "icon128.png"
+      "16":  "assets/icons/icon16.png",
+      "48":  "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
     },
     "default_title": "VTP Tool – Mở bảng điều khiển"
   },
   "side_panel": {
-    "default_path": "sidepanel.html"
+    "default_path": "src/ui/sidepanel.html"
   },
   "background": {
     "service_worker": "background.js"

@@ -18,12 +18,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function updateTabIndicator(activeBtn) {
         if (!tabIndicator || !activeBtn) return;
-        const track = activeBtn.closest('.tab-track');
-        if (!track) return;
-        const trackRect = track.getBoundingClientRect();
-        const btnRect   = activeBtn.getBoundingClientRect();
-        tabIndicator.style.width  = btnRect.width + 'px';
-        tabIndicator.style.transform = `translateX(${btnRect.left - trackRect.left - 3}px)`;
+        const nav = activeBtn.closest('.tab-nav');
+        if (!nav) return;
+        const navRect = nav.getBoundingClientRect();
+        const btnRect = activeBtn.getBoundingClientRect();
+        tabIndicator.style.width     = btnRect.width + 'px';
+        tabIndicator.style.transform = `translateX(${btnRect.left - navRect.left}px)`;
     }
 
     // Init indicator position
@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
-                files: ['notification.js', 'chinhgio_content.js']
+                files: ['src/shared/notification.js', 'src/modules/chinhgio/chinhgio_content.js']
             });
         } catch (e) {
             console.error('[VTP] Lỗi inject script:', e);
@@ -589,7 +589,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // D: Inject kiemke_tuyen_auto (5 bước)
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id }, world: 'MAIN',
-                    files: ['notification.js', 'kiemke_tuyen_auto.js']
+                    files: ['src/shared/notification.js', 'src/modules/kiemke/kiemke_tuyen_auto.js']
                 });
 
                 // E: Chờ trang scan mở (URL change hoặc SPA input.clsinputpg)
@@ -608,7 +608,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.log('[VTP] Inject gapton_core_scan.js...');
                 await chrome.scripting.executeScript({
                     target: { tabId: tab.id }, world: 'MAIN',
-                    files: ['notification.js', 'gapton_settings.js', 'gapton_smart_delay.js', 'gapton_core_scan.js']
+                    files: ['src/shared/notification.js', 'src/modules/kiemke/gapton_settings.js', 'src/modules/kiemke/gapton_smart_delay.js', 'src/modules/kiemke/gapton_core_scan.js']
                 });
 
                 // G: Poll __VTP_SCAN_COMPLETE__ (timeout 30 phút)
@@ -688,7 +688,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 world:  'MAIN',
-                files:  ['notification.js', 'gapton_settings.js', 'gapton_smart_delay.js', 'gapton_core_scan.js']
+                files:  ['src/shared/notification.js', 'src/modules/kiemke/gapton_settings.js', 'src/modules/kiemke/gapton_smart_delay.js', 'src/modules/kiemke/gapton_core_scan.js']
             });
         } catch (e) {
             console.error('[VTP] Lỗi inject Kiểm Tồn:', e);

@@ -15,5 +15,5 @@ desktop.ini
 # Logs
 *.log
 
-# Local test server (không cần publish)
-test_server/
+# Local dev tools — không cần publish
+tools/
