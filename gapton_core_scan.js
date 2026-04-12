@@ -10,13 +10,8 @@
 (async () => {
     const MAX_HISTORY = 80; // Giới hạn số mục trong history để tránh memory leak
 
-    const inputField = document.querySelector('input.clsinputpg');
-    if (!inputField) {
-        window.VTPNotification.show('LỖI: Không tìm thấy ô nhập Mã kiện (.clsinputpg)!', 'error');
-        return;
-    }
-
     // ── BƯỚC 6: Click tab "Bưu phẩm chưa kiểm kê" ──
+    // Phải switch tab TRƯỚC, vì input.clsinputpg chỉ xuất hiện khi ở tab chưa kiểm kê
     // Mặc định trang scan mở ở tab "Bưu phẩm đã kiểm kê" → phải chuyển sang tab chưa kiểm kê
     async function switchToUnscannedTab() {
         // Tìm tất cả các tab button có chứa text "chưa kiểm kê"
@@ -56,14 +51,29 @@
         return true;
     }
 
-    // Chạy bước 6 trước khi kiểm tra mã
+    // Chạy bước 6 TRƯỚC KHI kiểm tra input (input chỉ xuất hiện sau khi ở đúng tab)
     await switchToUnscannedTab();
+
+    // Chờ input.clsinputpg xuất hiện sau khi đổi tab (tối đa 10 giây)
+    let inputField = null;
+    const inputDeadline = Date.now() + 10000;
+    while (Date.now() < inputDeadline) {
+        inputField = document.querySelector('input.clsinputpg');
+        if (inputField) break;
+        await new Promise(r => setTimeout(r, 400));
+    }
+
+    if (!inputField) {
+        window.VTPNotification.show('LỖI: Không tìm thấy ô nhập Mã kiện (.clsinputpg)! Hãy kiểm tra lại trang.', 'error');
+        window.__VTP_SCAN_COMPLETE__ = false;
+        return;
+    }
 
     // Tắt các event jQuery can thiệp vào input (sau khi đổi tab vì DOM có thể thay đổi)
     if (typeof $ !== 'undefined') $(inputField).off('cut copy paste keypress');
 
-    // Chờ thêm 1 giây để trang ổn định sau khi đổi tab
-    await new Promise(r => setTimeout(r, 1000));
+    // Chờ thêm 800ms để trang ổn định sau khi đổi tab
+    await new Promise(r => setTimeout(r, 800));
 
     // ── Lấy danh sách mã hợp lệ trên trang hiện tại ──
     function getValidCodes() {
