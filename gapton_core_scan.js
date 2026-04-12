@@ -132,13 +132,13 @@
         const cells        = document.querySelectorAll('.z-listcell-content');
         const validPrefixes = window.VTPSettings
             ? window.VTPSettings.getPrefixes()  // dùng cache từ gapton_settings v1.1
-            : ['SHOPEE', 'VTP', 'PKE', 'KMS', 'PSL', 'TPO'];
+            : ['SHOPEE', 'VTP', 'VGI', 'PKE', 'KMS', 'PSL', 'TPO'];
 
         const data = [];
         cells.forEach(cell => {
             const code = cell.innerText.trim().replace(/\s+/g, '');
             if (code.length >= 8) {
-                const isStandard = /^[a-zA-Z0-9-]{8,40}$/.test(code);
+                const isStandard = /^[a-zA-Z0-9.\-_\/+]{8,50}$/.test(code);
                 const hasPrefix  = validPrefixes.some(p => code.toUpperCase().startsWith(p));
                 if (isStandard || hasPrefix) data.push({ element: cell, code });
             }

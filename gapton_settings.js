@@ -3,7 +3,7 @@
 //  v1.1: In-memory cache để tránh JSON.parse trong vòng lặp nóng
 // ============================================================
 window.VTPSettings = (function () {
-    const DEFAULT_PREFIXES = ['SHOPEE', 'VTP', 'PKE', 'KMS', 'PSL', 'TPO'];
+    const DEFAULT_PREFIXES = ['SHOPEE', 'VTP', 'VGI', 'PKE', 'KMS', 'PSL', 'TPO'];
     const STORAGE_KEY = 'vtp_custom_prefixes';
 
     // Cache trong bộ nhớ — tránh JSON.parse(localStorage) mỗi vòng lặp
