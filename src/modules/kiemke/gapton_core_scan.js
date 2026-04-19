@@ -1,11 +1,12 @@
 // ============================================================
 //  VTP Tool – Kiểm Tồn Core Scan
+//  v1.2 Structural Fix – Đồng bộ 2 trường hợp:
+//    TH1: Tab "chưa kiểm kê" có mã → scan tự động → click Hoàn thành → 2s → F5
+//    TH2: Tab "chưa kiểm kê" trống / "Đã kiểm kê hết toán bộ" → click Hoàn thành → 2s → F5
+//  QUAN TRỌNG: Kiểm tra TH2 TRƯỚC khi tìm input.clsinputpg
+//    (Tab trống không có input → nếu tìm input trước sẽ báo lỗi, không đến được clickHoanThanh)
 //  v1.1 Performance & Stability Fixes:
-//    - Fix O(n²): Không dùng .filter() lại toàn bộ mỗi vòng
-//    - Fix memory leak: Giới hạn history list tối đa MAX_HISTORY mục
-//    - Fix double getValidCodes(): Dùng lại biến allCodesOnPage đã có
-//    - Fix isStopped guard: Kiểm tra sau mỗi await quan trọng
-//    - Cache VTPSettings.getPrefixes() (đã xử lý trong gapton_settings.js)
+//    - Fix O(n²), memory leak, double getValidCodes(), isStopped guard, prefix cache
 // ============================================================
 (async () => {
     const MAX_HISTORY = 80; // Giới hạn số mục trong history để tránh memory leak
@@ -103,29 +104,11 @@
         return true;
     }
 
-    // Chạy bước 6 TRƯỚC KHI kiểm tra input (input chỉ xuất hiện sau khi ở đúng tab)
+    // Switch sang tab "Bưu phẩm chưa kiểm kê" TRƯỚC KHI làm bất cứ điều gì
     await switchToUnscannedTab();
 
-    // Chờ input.clsinputpg xuất hiện sau khi đổi tab (tối đa 10 giây)
-    let inputField = null;
-    const inputDeadline = Date.now() + 10000;
-    while (Date.now() < inputDeadline) {
-        inputField = document.querySelector('input.clsinputpg');
-        if (inputField) break;
-        await new Promise(r => setTimeout(r, 400));
-    }
-
-    if (!inputField) {
-        window.VTPNotification.show('LỖI: Không tìm thấy ô nhập Mã kiện (.clsinputpg)! Hãy kiểm tra lại trang.', 'error');
-        window.__VTP_SCAN_COMPLETE__ = false;
-        return;
-    }
-
-    // Tắt các event jQuery can thiệp vào input (sau khi đổi tab vì DOM có thể thay đổi)
-    if (typeof $ !== 'undefined') $(inputField).off('cut copy paste keypress');
-
-    // Chờ thêm 800ms để trang ổn định sau khi đổi tab
-    await new Promise(r => setTimeout(r, 800));
+    // Đợi 1s để nội dung tab render xong trước khi kiểm tra
+    await new Promise(r => setTimeout(r, 1000));
 
     // ── Lấy danh sách mã hợp lệ trên trang hiện tại ──
     // Fix #9: Dùng Set để deduplicate – tránh mã xuất hiện 2+ lần
@@ -189,31 +172,57 @@
         return true;
     }
 
-    // ── Kiểm tra ban đầu: tab "Bưu phẩm chưa kiểm kê" trống ──
-    // Trường hợp 1: không có mã hợp lệ nào (getValidCodes() = 0)
-    // Trường hợp 2: có emptybody "Đã kiểm kê hết toàn bộ phiếu gửi!"
-    const emptyBody = document.querySelector('.z-listbox-emptybody-content');
-    const isAlreadyDone = emptyBody && (emptyBody.textContent || '').includes('Đã kiểm kê hết');
+    // ════════════════════════════════════════════════════════════
+    //  TRƯỜNG HỢP 2: Tab "chưa kiểm kê" TRỐNG
+    //  Điều kiện: không có mã hợp lệ nào HOẶC
+    //             xuất hiện dòng "Đã kiểm kê hết toán bộ phiếu gửi!"
+    //  → Click Hoàn thành → đợi 2s → F5 → tuyến tiếp theo
+    // ════════════════════════════════════════════════════════════
+    {
+        const emptyBodyEl   = document.querySelector('.z-listbox-emptybody-content');
+        const isAlreadyDone = emptyBodyEl && (emptyBodyEl.textContent || '').includes('Đã kiểm kê hết');
 
-    if (getValidCodes().length === 0 || isAlreadyDone) {
-        console.log('[VTP Core] Tab chưa kiểm kê trống hoặc đã kiểm kê hết – tự động hoàn thành...');
-        if (window.VTPNotification?.show) {
-            window.VTPNotification.show(
-                isAlreadyDone ? 'Đã kiểm kê hết – Tự động hoàn thành...' : 'Không có bưu phẩm – Tự động hoàn thành...',
-                'info'
-            );
+        if (getValidCodes().length === 0 || isAlreadyDone) {
+            const msg = isAlreadyDone
+                ? 'Đã kiểm kê hết toàn bộ phiếu gửi – Tự động hoàn thành...'
+                : 'Không có bưu phẩm chưa kiểm kê – Tự động hoàn thành...';
+            console.log('[VTP Core] TH2 –', msg);
+            if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
+
+            await new Promise(r => setTimeout(r, 1500)); // đợi trang ổn định
+            await clickHoanThanh();                       // click span.z-label "Hoàn thành"
+
+            window.__VTP_SCAN_COMPLETE__ = true;
+            console.log('[VTP Core] ✅ __VTP_SCAN_COMPLETE__ = true (TH2: tab trống / đã kiểm kê hết)');
+            await new Promise(r => setTimeout(r, 2000)); // đợi 2s
+            location.reload();                            // F5 → sidepanel chuyển tuyến tiếp
+            return;
         }
+    }
 
-        await new Promise(r => setTimeout(r, 1500));
-        await clickHoanThanh();
+    // ════════════════════════════════════════════════════════════
+    //  TRƯỜNG HỢP 1: Có mã cần quét → tìm ô nhập mã
+    //  (inputField chỉ tồn tại khi tab có mã – phải kiểm tra TH2 trước)
+    // ════════════════════════════════════════════════════════════
+    let inputField = null;
+    const inputDeadline = Date.now() + 10000;
+    while (Date.now() < inputDeadline) {
+        inputField = document.querySelector('input.clsinputpg');
+        if (inputField) break;
+        await new Promise(r => setTimeout(r, 400));
+    }
 
-        window.__VTP_SCAN_COMPLETE__ = true;
-        console.log('[VTP Core] ✅ Set __VTP_SCAN_COMPLETE__ = true (tab trống)');
-        await new Promise(r => setTimeout(r, 3000));
-        location.reload();
+    if (!inputField) {
+        if (window.VTPNotification?.show)
+            window.VTPNotification.show('LỖI: Không tìm thấy ô nhập Mã kiện (.clsinputpg)!', 'error');
+        window.__VTP_SCAN_COMPLETE__ = false;
         return;
     }
 
+    // Tắt event jQuery can thiệp vào input
+    if (typeof $ !== 'undefined') $(inputField).off('cut copy paste keypress');
+    // Đợi 800ms để trang ổn định
+    await new Promise(r => setTimeout(r, 800));
 
     // ── Xây UI (xóa instance cũ nếu có) ──
     let extUI = document.getElementById('vtp-auto-ext-ui');
@@ -517,10 +526,13 @@
         if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(150);
     }
 
-    // ── Hoàn thành ──
+    // ════════════════════════════════════════════════════════════
+    //  TRƯỜNG HỢP 1 – HOÀN THÀNH: Đã scan xong toàn bộ mã
+    //  → Click Hoàn thành → đợi 2s → F5 → tuyến tiếp theo
+    // ════════════════════════════════════════════════════════════
     if (!isStopped) {
-        progressBarEl.style.width      = '100%';
-        progressBarEl.style.background = 'linear-gradient(90deg, #28a745, #20c997)';
+        progressBarEl.style.width        = '100%';
+        progressBarEl.style.background   = 'linear-gradient(90deg, #28a745, #20c997)';
         statusContainer.style.background = '#d4edda';
         statusEl.style.color             = '#155724';
         statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm! Đang bấm Hoàn thành...`;
@@ -532,8 +544,10 @@
             console.warn('[VTP Core Scan] ⚠️ Không tìm thấy nút Hoàn thành – tiếp tục báo xong');
         }
 
-        // Báo hiệu cho sidepanel biết scan đã xong → sidepanel F5 và chuyển tuyến tiếp theo
+        // Báo hiệu cho sidepanel, đợi 2s rồi F5 → chuyển tuyến tiếp theo
         window.__VTP_SCAN_COMPLETE__ = true;
-        console.log('[VTP Core Scan] ✅ Scan hoàn tất – đã set __VTP_SCAN_COMPLETE__ = true');
+        console.log('[VTP Core Scan] ✅ Scan hoàn tất – đã set __VTP_SCAN_COMPLETE__ = true. Đang đợi 2s rồi F5...');
+        await new Promise(r => setTimeout(r, 2000));
+        location.reload();
     }
 })();
