@@ -160,101 +160,57 @@
         return true;
     }
 
-    // ── Kiểm tra ban đầu ──
-    // Nếu tab "Bưu phẩm chưa kiểm kê" không có mã phiếu gửi nào
-    // → tự động bấm "Hoàn thành" và F5 lại trang (không cần quét gì)
-    if (getValidCodes().length === 0) {
-        console.log('[VTP Core] Tab chưa kiểm kê trống – tự động hoàn thành và F5...');
+    // ── Helper: tìm và click nút "Hoàn thành" (span.z-label) ──
+    // Selector ưu tiên: span.z-label chứa đúng text "Hoàn thành"
+    async function clickHoanThanh() {
+        let btn = null;
 
-        // Tìm nút "Hoàn thành" trên trang
-        async function autoCompleteAndRefresh() {
-            // Chiến lược 1: Tìm link/button "Hoàn thành" trên trang
-            let completeBtn = null;
+        // Chiến lược 1 (chính xác nhất): span.z-label có text "Hoàn thành"
+        for (const el of document.querySelectorAll('span.z-label')) {
+            if ((el.textContent || '').trim() === 'Hoàn thành') { btn = el; break; }
+        }
 
-            // Tìm trong các thẻ <a> (ZK thường dùng <a> cho link "Hoàn thành")
-            const allLinks = document.querySelectorAll('a');
-            for (const a of allLinks) {
-                const txt = (a.textContent || '').trim();
-                if (txt === 'Hoàn thành' || txt === 'Hoàn Thành') {
-                    completeBtn = a;
-                    break;
+        // Chiến lược 2: bất kỳ element lá nào có text "Hoàn thành"
+        if (!btn) {
+            for (const el of document.querySelectorAll('span, a, button')) {
+                if (el.children.length === 0 && (el.textContent || '').trim() === 'Hoàn thành') {
+                    btn = el; break;
                 }
-            }
-
-            // Chiến lược 2: Tìm trong các button ZK
-            if (!completeBtn) {
-                const allButtons = document.querySelectorAll('button, .z-button, .z-toolbarbutton');
-                for (const btn of allButtons) {
-                    const txt = (btn.textContent || '').trim();
-                    if (txt === 'Hoàn thành' || txt === 'Hoàn Thành') {
-                        completeBtn = btn;
-                        break;
-                    }
-                }
-            }
-
-            // Chiến lược 3: Tìm bất kỳ element nào chứa text "Hoàn thành" có thể click được
-            if (!completeBtn) {
-                const walker = document.createTreeWalker(
-                    document.body,
-                    NodeFilter.SHOW_ELEMENT,
-                    {
-                        acceptNode(node) {
-                            const txt = (node.textContent || '').trim();
-                            // Chỉ lấy element trực tiếp chứa text, không phải parent lớn
-                            if ((txt === 'Hoàn thành' || txt === 'Hoàn Thành') && node.children.length === 0) {
-                                return NodeFilter.FILTER_ACCEPT;
-                            }
-                            return NodeFilter.FILTER_SKIP;
-                        }
-                    }
-                );
-                completeBtn = walker.nextNode();
-                // Nếu element tìm được không click được, thử tìm parent có click
-                if (completeBtn && !completeBtn.closest('a, button, [role="button"]')) {
-                    const clickableParent = completeBtn.closest('a, button, [role="button"], .z-toolbarbutton');
-                    if (clickableParent) completeBtn = clickableParent;
-                }
-            }
-
-            if (completeBtn) {
-                if (window.VTPNotification?.show) {
-                    window.VTPNotification.show('Không có bưu phẩm chưa kiểm kê – Tự động hoàn thành...', 'info');
-                }
-                console.log('[VTP Core] ✅ Tìm thấy nút "Hoàn thành" – click...');
-                completeBtn.click();
-
-                // Chờ xác nhận dialog nếu có (dialog "Chấp nhận" từ ZK messagebox)
-                await new Promise(r => setTimeout(r, 2000));
-                const acceptBtn = document.querySelector('.z-messagebox-button');
-                if (acceptBtn) {
-                    console.log('[VTP Core] Click "Chấp nhận" trong dialog xác nhận...');
-                    acceptBtn.click();
-                    await new Promise(r => setTimeout(r, 1500));
-                }
-
-                // F5 lại trang
-                console.log('[VTP Core] 🔄 Chuẩn bị F5 lại trang...');
-                // Báo hiệu scan hoàn tất TRƯỚC khi reload (để popup.js nhận được)
-                window.__VTP_SCAN_COMPLETE__ = true;
-                console.log('[VTP Core] ✅ Set __VTP_SCAN_COMPLETE__ = true (auto-complete, no codes)');
-                // Chờ 3 giây để sidepanel poll kịp nhận flag
-                await new Promise(r => setTimeout(r, 3000));
-                location.reload();
-            } else {
-                console.warn('[VTP Core] ⚠️ Không tìm thấy nút "Hoàn thành" – F5 trực tiếp...');
-                if (window.VTPNotification?.show) {
-                    window.VTPNotification.show('Không có bưu phẩm chưa kiểm kê – Đang tải lại trang...', 'warning');
-                }
-                window.__VTP_SCAN_COMPLETE__ = true;
-                console.log('[VTP Core] ✅ Set __VTP_SCAN_COMPLETE__ = true (auto-complete, no button found)');
-                // Chờ 3 giây để sidepanel poll kịp nhận flag
-                await new Promise(r => setTimeout(r, 3000));
-                location.reload();
             }
         }
 
-        await autoCompleteAndRefresh();
+        if (!btn) {
+            console.warn('[VTP Core] ⚠️ Không tìm thấy nút "Hoàn thành"');
+            return false;
+        }
+
+        console.log('[VTP Core] ✅ Click "Hoàn thành":', btn.id || btn.className);
+        btn.click();
+        return true;
+    }
+
+    // ── Kiểm tra ban đầu: tab "Bưu phẩm chưa kiểm kê" trống ──
+    // Trường hợp 1: không có mã hợp lệ nào (getValidCodes() = 0)
+    // Trường hợp 2: có emptybody "Đã kiểm kê hết toàn bộ phiếu gửi!"
+    const emptyBody = document.querySelector('.z-listbox-emptybody-content');
+    const isAlreadyDone = emptyBody && (emptyBody.textContent || '').includes('Đã kiểm kê hết');
+
+    if (getValidCodes().length === 0 || isAlreadyDone) {
+        console.log('[VTP Core] Tab chưa kiểm kê trống hoặc đã kiểm kê hết – tự động hoàn thành...');
+        if (window.VTPNotification?.show) {
+            window.VTPNotification.show(
+                isAlreadyDone ? 'Đã kiểm kê hết – Tự động hoàn thành...' : 'Không có bưu phẩm – Tự động hoàn thành...',
+                'info'
+            );
+        }
+
+        await new Promise(r => setTimeout(r, 1500));
+        await clickHoanThanh();
+
+        window.__VTP_SCAN_COMPLETE__ = true;
+        console.log('[VTP Core] ✅ Set __VTP_SCAN_COMPLETE__ = true (tab trống)');
+        await new Promise(r => setTimeout(r, 3000));
+        location.reload();
         return;
     }
 
@@ -567,10 +523,16 @@
         progressBarEl.style.background = 'linear-gradient(90deg, #28a745, #20c997)';
         statusContainer.style.background = '#d4edda';
         statusEl.style.color             = '#155724';
-        statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm!`;
+        statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm! Đang bấm Hoàn thành...`;
         pauseBtn.style.display           = 'none';
 
-        // Báo hiệu cho popup.js biết scan đã xong → popup sẽ F5 và chuyển tuyến tiếp theo
+        // Click nút "Hoàn thành" sau khi quét xong toàn bộ mã
+        const clicked = await clickHoanThanh();
+        if (!clicked) {
+            console.warn('[VTP Core Scan] ⚠️ Không tìm thấy nút Hoàn thành – tiếp tục báo xong');
+        }
+
+        // Báo hiệu cho sidepanel biết scan đã xong → sidepanel F5 và chuyển tuyến tiếp theo
         window.__VTP_SCAN_COMPLETE__ = true;
         console.log('[VTP Core Scan] ✅ Scan hoàn tất – đã set __VTP_SCAN_COMPLETE__ = true');
     }
