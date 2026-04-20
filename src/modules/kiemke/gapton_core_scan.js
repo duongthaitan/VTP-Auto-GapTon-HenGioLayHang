@@ -1,43 +1,39 @@
 // ============================================================
 //  VTP Tool – Kiểm Tồn Core Scan
-//  v1.2 Structural Fix – Đồng bộ 2 trường hợp:
+//  v1.3 Reliability Fix
 //    TH1: Tab "chưa kiểm kê" có mã → scan tự động → click Hoàn thành → 2s → F5
-//    TH2: Tab "chưa kiểm kê" trống / "Đã kiểm kê hết toán bộ" → click Hoàn thành → 2s → F5
-//  QUAN TRỌNG: Kiểm tra TH2 TRƯỚC khi tìm input.clsinputpg
-//    (Tab trống không có input → nếu tìm input trước sẽ báo lỗi, không đến được clickHoanThanh)
-//  v1.1 Performance & Stability Fixes:
-//    - Fix O(n²), memory leak, double getValidCodes(), isStopped guard, prefix cache
+//    TH2: Tab "chưa kiểm kê" trống → click Hoàn thành → 2s → F5
+//
+//  Thay đổi so với v1.2:
+//    [+] waitForTabContentReady(): Chờ nội dung tab load đúng cách
+//        thay vì setTimeout cứng 1s → tránh false-positive TH2
+//    [+] isUnscannedTabEmpty(): Kiểm tra visibility của <td> cha
+//        (.z-listbox-emptybody-content có thể tồn tại nhưng bị ẩn)
+//    [+] Hỗ trợ nhiều selector empty-state (ZK + test server)
+//    [+] Guard chống inject lại khi scan đang chạy
 // ============================================================
-(async () => {
-    const MAX_HISTORY = 80; // Giới hạn số mục trong history để tránh memory leak
+if (window.__VTP_CORE_SCAN_RUNNING__) {
+    console.warn('[VTP Core] Script đã đang chạy. Bỏ qua inject mới.');
+} else {
+window.__VTP_CORE_SCAN_RUNNING__ = true;
 
-    // ── Khởi tạo: Switch sang tab "Bưu phẩm chưa kiểm kê" ──
-    // Phải switch tab TRƯỚC, vì input.clsinputpg chỉ xuất hiện khi ở tab chưa kiểm kê
-    // Mặc định trang scan mở ở tab "Bưu phẩm đã kiểm kê" → phải chuyển sang tab chưa kiểm kê
-    //
-    // ZK framework tab structure:
-    //   <ul class="z-tabs-content">
-    //     <li class="z-tab">
-    //       <a class="z-tab-content">
-    //         <span class="z-tab-text" title="Bưu phẩm chưa kiểm kê">...</span>
-    //       </a>
-    //     </li>
-    //   </ul>
-    //
-    // QUAN TRỌNG: Phải click vào <a class="z-tab-content"> hoặc <li class="z-tab">
-    //   KHÔNG được click vào <ul> cha (selector [class*="tab"] match cả <ul>!)
+(async () => {
+    const MAX_HISTORY = 80;
+
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Switch sang tab "Bưu phẩm chưa kiểm kê"
+    //  3 chiến lược fallback theo cấu trúc ZK Framework
+    // ════════════════════════════════════════════════════════════
     async function switchToUnscannedTab() {
         let clickTarget = null;
         let parentLi    = null;
 
-        // ── Chiến lược 1 (Chính xác nhất): Tìm <span class="z-tab-text"> có title/text chứa "chưa kiểm kê"
-        const tabTextSpans = document.querySelectorAll('.z-tab-text');
-        for (const span of tabTextSpans) {
+        // Chiến lược 1: span.z-tab-text có title/text "chưa kiểm kê"
+        for (const span of document.querySelectorAll('.z-tab-text')) {
             const title = (span.getAttribute('title') || '').trim();
             const txt   = (span.textContent || '').trim();
             if (title.includes('chưa kiểm kê') || txt.includes('chưa kiểm kê') ||
                 title.includes('Chưa kiểm kê') || txt.includes('Chưa kiểm kê')) {
-                // Navigate lên đúng element click được theo cấu trúc ZK
                 const anchor = span.closest('a.z-tab-content') || span.closest('a');
                 parentLi     = span.closest('li.z-tab') || span.closest('li');
                 clickTarget  = anchor || parentLi || span;
@@ -45,10 +41,9 @@
             }
         }
 
-        // ── Chiến lược 2 (Fallback): Tìm <a class="z-tab-content"> chứa text "chưa kiểm kê"
+        // Chiến lược 2: a.z-tab-content chứa text "chưa kiểm kê"
         if (!clickTarget) {
-            const tabAnchors = document.querySelectorAll('a.z-tab-content');
-            for (const a of tabAnchors) {
+            for (const a of document.querySelectorAll('a.z-tab-content')) {
                 const txt = (a.innerText || a.textContent || '').trim();
                 if (txt.includes('chưa kiểm kê') || txt.includes('Chưa kiểm kê')) {
                     clickTarget = a;
@@ -58,10 +53,9 @@
             }
         }
 
-        // ── Chiến lược 3 (Last resort): Tìm <li class="z-tab"> chứa text "chưa kiểm kê"
+        // Chiến lược 3: li.z-tab chứa text "chưa kiểm kê"
         if (!clickTarget) {
-            const tabLis = document.querySelectorAll('li.z-tab');
-            for (const li of tabLis) {
+            for (const li of document.querySelectorAll('li.z-tab')) {
                 const txt = (li.innerText || li.textContent || '').trim();
                 if (txt.includes('chưa kiểm kê') || txt.includes('Chưa kiểm kê')) {
                     clickTarget = li;
@@ -76,26 +70,23 @@
             return false;
         }
 
-        // Kiểm tra nếu tab đã được chọn sẵn → không cần click
+        // Tab đã được chọn sẵn → không cần click
         if (parentLi && parentLi.classList.contains('z-tab-selected')) {
-            console.log('[VTP Core] ✅ Tab "Bưu phẩm chưa kiểm kê" đã được chọn sẵn – bỏ qua click');
+            console.log('[VTP Core] ✅ Tab "Bưu phẩm chưa kiểm kê" đã được chọn sẵn');
             return true;
         }
 
         console.log('[VTP Core] Clicking tab chưa kiểm kê:', clickTarget.tagName, clickTarget.className);
         clickTarget.click();
 
-        // Đợi nội dung tab mới load (tối đa 10 giây, poll mỗi 500ms)
+        // Đợi z-tab-selected xuất hiện (tối đa 10s, poll 500ms)
         const deadline = Date.now() + 10000;
         while (Date.now() < deadline) {
             await new Promise(r => setTimeout(r, 500));
-
-            // Xác nhận tab đã thực sự chuyển (class z-tab-selected phải ở đúng li)
             const refreshLi = parentLi || clickTarget.closest('li.z-tab');
             if (refreshLi && refreshLi.classList.contains('z-tab-selected')) {
-                console.log('[VTP Core] ✅ Tab chưa kiểm kê đã chuyển thành công (z-tab-selected)');
-                // Chờ thêm 1 giây để nội dung tab render xong
-                await new Promise(r => setTimeout(r, 1000));
+                console.log('[VTP Core] ✅ Tab chưa kiểm kê đã chuyển (z-tab-selected)');
+                await new Promise(r => setTimeout(r, 1000)); // Buffer render
                 return true;
             }
         }
@@ -104,23 +95,114 @@
         return true;
     }
 
-    // Switch sang tab "Bưu phẩm chưa kiểm kê" TRƯỚC KHI làm bất cứ điều gì
-    await switchToUnscannedTab();
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Chờ nội dung tab "chưa kiểm kê" load xong
+    //  Trả về: 'has_codes' | 'empty' | 'timeout'
+    //
+    //  Logic:
+    //    Phase 1 – Chờ loading indicator biến mất (tối đa 5s)
+    //    Phase 2 – Poll xác định trạng thái:
+    //      • Có mã hợp lệ → 'has_codes'
+    //      • Empty body element hiển thị → 'empty'
+    //      • Hết timeout → 'timeout'
+    // ════════════════════════════════════════════════════════════
+    async function waitForTabContentReady(timeoutMs = 10000) {
+        const start = Date.now();
 
-    // Đợi 1s để nội dung tab render xong trước khi kiểm tra
-    await new Promise(r => setTimeout(r, 1000));
+        // Phase 1: Chờ loading indicator biến mất
+        const loadDeadline = start + 5000;
+        while (Date.now() < loadDeadline) {
+            const loading = document.querySelector(
+                '.z-loading-indicator, .z-apply-loading-indicator, .z-listbox-loading'
+            );
+            const isLoading = loading &&
+                loading.style.display !== 'none' &&
+                loading.offsetParent !== null;
+            if (!isLoading) break;
+            await new Promise(r => setTimeout(r, 300));
+        }
 
-    // ── Lấy danh sách mã hợp lệ trên trang hiện tại ──
-    // Fix #9: Dùng Set để deduplicate – tránh mã xuất hiện 2+ lần
-    //         (vd: header row + data row của ZK grid render trùng)
+        // Phase 2: Poll cho đến khi xác định được trạng thái
+        while (Date.now() - start < timeoutMs) {
+            await new Promise(r => setTimeout(r, 350));
+
+            // Kiểm tra có mã hợp lệ → TH1
+            if (getValidCodes().length > 0) {
+                console.log('[VTP Core] waitForTabContentReady → has_codes');
+                return 'has_codes';
+            }
+
+            // Kiểm tra empty state (nhiều cách để hỗ trợ cả ZK và test page)
+            if (isUnscannedTabEmpty()) {
+                console.log('[VTP Core] waitForTabContentReady → empty');
+                return 'empty';
+            }
+        }
+
+        console.warn('[VTP Core] waitForTabContentReady → timeout sau', timeoutMs, 'ms');
+        return 'timeout';
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Xác định tab "chưa kiểm kê" có trống không
+    //  Hỗ trợ 3 cách hiển thị empty state:
+    //    1. ZK: .z-listbox-emptybody-content bên trong <td> hiển thị
+    //    2. ZK: emptybody <td> có display='table-cell'
+    //    3. Fallback: .empty-state text / text tổng quát
+    // ════════════════════════════════════════════════════════════
+    function isUnscannedTabEmpty() {
+        // Cách 1: ZK listbox emptybody element
+        const emptyBodyEl = document.querySelector('.z-listbox-emptybody-content');
+        if (emptyBodyEl) {
+            const parentTd = emptyBodyEl.closest('td');
+            if (parentTd) {
+                // Nếu parentTd bị ẩn (display:none) → list CÓ data, không phải empty
+                const tdDisplay = parentTd.style.display;
+                const computed  = getComputedStyle(parentTd).display;
+                const isHidden  = tdDisplay === 'none' || computed === 'none';
+                if (!isHidden) {
+                    console.log('[VTP Core] Empty: .z-listbox-emptybody-content visible');
+                    return true;
+                }
+            } else {
+                // Không có td cha → element tồn tại là đủ
+                console.log('[VTP Core] Empty: .z-listbox-emptybody-content (no td parent)');
+                return true;
+            }
+        }
+
+        // Cách 2: td[id$="-empty"] có display:table-cell (cấu trúc ZK chuẩn)
+        const emptyTd = document.querySelector('td[id$="-empty"]');
+        if (emptyTd) {
+            const tdDisplay = emptyTd.style.display || getComputedStyle(emptyTd).display;
+            if (tdDisplay !== 'none' && tdDisplay !== '') {
+                console.log('[VTP Core] Empty: td[id$="-empty"] visible, text:', emptyTd.textContent.trim().slice(0, 50));
+                return true;
+            }
+        }
+
+        // Cách 3: .empty-state class (test server fallback)
+        const emptyStateEl = document.querySelector('.empty-state');
+        if (emptyStateEl && emptyStateEl.offsetParent !== null) {
+            console.log('[VTP Core] Empty: .empty-state visible');
+            return true;
+        }
+
+        return false;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Lấy danh sách mã hợp lệ trên trang
+    //  Dùng Set để deduplicate (tránh ZK render trùng)
+    // ════════════════════════════════════════════════════════════
     function getValidCodes() {
-        const cells        = document.querySelectorAll('.z-listcell-content');
+        const cells         = document.querySelectorAll('.z-listcell-content');
         const validPrefixes = window.VTPSettings
-            ? window.VTPSettings.getPrefixes()  // dùng cache từ gapton_settings v1.1
+            ? window.VTPSettings.getPrefixes()
             : ['SHOPEE', 'VTP', 'VGI', 'PKE', 'KMS', 'PSL', 'TPO'];
 
         const data = [];
-        const seen = new Set(); // Deduplicate: tránh progress tính sai
+        const seen = new Set();
         cells.forEach(cell => {
             const code = cell.innerText.trim().replace(/\s+/g, '');
             if (code.length >= 8 && !seen.has(code)) {
@@ -135,7 +217,9 @@
         return data;
     }
 
-    // ── Lật trang tiếp theo ──
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Lật trang tiếp theo
+    // ════════════════════════════════════════════════════════════
     function clickNextPage() {
         const nextBtn = document.querySelector('.z-paging-next');
         if (!nextBtn || nextBtn.hasAttribute('disabled') || nextBtn.classList.contains('z-disabled')) return false;
@@ -143,17 +227,20 @@
         return true;
     }
 
-    // ── Helper: tìm và click nút "Hoàn thành" (span.z-label) ──
-    // Selector ưu tiên: span.z-label chứa đúng text "Hoàn thành"
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Click nút "Hoàn thành"
+    //  Chiến lược 1: span.z-label text = "Hoàn thành"
+    //  Chiến lược 2: Bất kỳ element lá nào có text "Hoàn thành"
+    // ════════════════════════════════════════════════════════════
     async function clickHoanThanh() {
         let btn = null;
 
-        // Chiến lược 1 (chính xác nhất): span.z-label có text "Hoàn thành"
+        // Chiến lược 1: span.z-label đúng text
         for (const el of document.querySelectorAll('span.z-label')) {
             if ((el.textContent || '').trim() === 'Hoàn thành') { btn = el; break; }
         }
 
-        // Chiến lược 2: bất kỳ element lá nào có text "Hoàn thành"
+        // Chiến lược 2: Bất kỳ element lá nào
         if (!btn) {
             for (const el of document.querySelectorAll('span, a, button')) {
                 if (el.children.length === 0 && (el.textContent || '').trim() === 'Hoàn thành') {
@@ -167,42 +254,56 @@
             return false;
         }
 
-        console.log('[VTP Core] ✅ Click "Hoàn thành":', btn.id || btn.className);
+        console.log('[VTP Core] ✅ Click "Hoàn thành":', btn.id || btn.tagName, btn.className);
         btn.click();
         return true;
     }
 
     // ════════════════════════════════════════════════════════════
-    //  TRƯỜNG HỢP 2: Tab "chưa kiểm kê" TRỐNG
-    //  Điều kiện: không có mã hợp lệ nào HOẶC
-    //             xuất hiện dòng "Đã kiểm kê hết toán bộ phiếu gửi!"
-    //  → Click Hoàn thành → đợi 2s → F5 → tuyến tiếp theo
+    //  MAIN FLOW – BƯỚC 1: Switch sang tab "chưa kiểm kê"
     // ════════════════════════════════════════════════════════════
-    {
-        const emptyBodyEl   = document.querySelector('.z-listbox-emptybody-content');
-        const isAlreadyDone = emptyBodyEl && (emptyBodyEl.textContent || '').includes('Đã kiểm kê hết');
+    await switchToUnscannedTab();
+    await new Promise(r => setTimeout(r, 800)); // Buffer render sau tab switch
 
-        if (getValidCodes().length === 0 || isAlreadyDone) {
-            const msg = isAlreadyDone
-                ? 'Đã kiểm kê hết toàn bộ phiếu gửi – Tự động hoàn thành...'
-                : 'Không có bưu phẩm chưa kiểm kê – Tự động hoàn thành...';
-            console.log('[VTP Core] TH2 –', msg);
-            if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
+    // ════════════════════════════════════════════════════════════
+    //  MAIN FLOW – BƯỚC 2: Xác định trạng thái tab
+    // ════════════════════════════════════════════════════════════
+    const tabState = await waitForTabContentReady(10000);
+    console.log('[VTP Core] Tab state sau load:', tabState);
 
-            await new Promise(r => setTimeout(r, 1500)); // đợi trang ổn định
-            await clickHoanThanh();                       // click span.z-label "Hoàn thành"
+    // ════════════════════════════════════════════════════════════
+    //  TRƯỜNG HỢP 2 (TH2): Tab trống hoặc "Đã kiểm kê hết"
+    //  Điều kiện: tabState = 'empty' hoặc 'timeout'
+    //  Hành động: Click Hoàn thành → đợi 2s → F5
+    // ════════════════════════════════════════════════════════════
+    if (tabState === 'empty' || tabState === 'timeout') {
+        // Lấy thông điệp từ empty body element nếu có
+        const emptyBodyEl   = document.querySelector('.z-listbox-emptybody-content, .empty-state');
+        const emptyText     = emptyBodyEl ? emptyBodyEl.textContent.trim() : '';
+        const msg = emptyText
+            ? emptyText
+            : (tabState === 'timeout'
+                ? 'Không tải được danh sách – tự động hoàn thành...'
+                : 'Không có bưu phẩm chưa kiểm kê – Tự động hoàn thành...');
 
-            window.__VTP_SCAN_COMPLETE__ = true;
-            console.log('[VTP Core] ✅ __VTP_SCAN_COMPLETE__ = true (TH2: tab trống / đã kiểm kê hết)');
-            await new Promise(r => setTimeout(r, 2000)); // đợi 2s
-            location.reload();                            // F5 → sidepanel chuyển tuyến tiếp
-            return;
-        }
+        console.log('[VTP Core] TH2 –', msg);
+        if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
+
+        await new Promise(r => setTimeout(r, 1500)); // Đợi trang ổn định
+        await clickHoanThanh();
+
+        // Báo hiệu scan xong → sidepanel sẽ chuyển tuyến tiếp
+        window.__VTP_SCAN_COMPLETE__ = true;
+        console.log('[VTP Core] ✅ __VTP_SCAN_COMPLETE__ = true (TH2: tab trống)');
+        await new Promise(r => setTimeout(r, 2000)); // Đợi 2s
+        location.reload();                            // F5 → sidepanel chuyển tuyến tiếp
+        window.__VTP_CORE_SCAN_RUNNING__ = false;
+        return;
     }
 
     // ════════════════════════════════════════════════════════════
-    //  TRƯỜNG HỢP 1: Có mã cần quét → tìm ô nhập mã
-    //  (inputField chỉ tồn tại khi tab có mã – phải kiểm tra TH2 trước)
+    //  TRƯỜNG HỢP 1 (TH1): Có mã cần quét → Tìm ô nhập mã
+    //  input.clsinputpg chỉ tồn tại khi tab có mã
     // ════════════════════════════════════════════════════════════
     let inputField = null;
     const inputDeadline = Date.now() + 10000;
@@ -215,16 +316,17 @@
     if (!inputField) {
         if (window.VTPNotification?.show)
             window.VTPNotification.show('LỖI: Không tìm thấy ô nhập Mã kiện (.clsinputpg)!', 'error');
+        console.error('[VTP Core] ❌ Không tìm thấy input.clsinputpg sau 10s');
         window.__VTP_SCAN_COMPLETE__ = false;
+        window.__VTP_CORE_SCAN_RUNNING__ = false;
         return;
     }
 
     // Tắt event jQuery can thiệp vào input
     if (typeof $ !== 'undefined') $(inputField).off('cut copy paste keypress');
-    // Đợi 800ms để trang ổn định
     await new Promise(r => setTimeout(r, 800));
 
-    // ── Xây UI (xóa instance cũ nếu có) ──
+    // ── Xây UI overlay (xóa instance cũ nếu có) ──────────────
     let extUI = document.getElementById('vtp-auto-ext-ui');
     if (extUI) extUI.remove();
 
@@ -272,25 +374,25 @@
     `;
     document.body.appendChild(extUI);
 
-    // ── State ──
+    // ── State ─────────────────────────────────────────────────
     let isPaused         = false;
     let isStopped        = false;
     let processedCount   = 0;
-    let processedCodeSet = new Set(); // Dùng Set để tra cứu O(1)
+    let processedCodeSet = new Set();
     let currentPage      = 1;
     let exportDataArray  = [];
     let totalOnPage      = 0;
 
-    // ── DOM refs ──
-    const countEl          = document.getElementById('vtp-current-count');
-    const statusContainer  = document.getElementById('vtp-status-container');
-    const statusEl         = document.getElementById('vtp-status-text');
-    const progressBarEl    = document.getElementById('vtp-real-progress-bar');
-    const progressTextEl   = document.getElementById('vtp-progress-text');
-    const historyListEl    = document.getElementById('vtp-history-list');
-    const pauseBtn         = document.getElementById('vtp-btn-pause');
+    // ── DOM refs ───────────────────────────────────────────────
+    const countEl         = document.getElementById('vtp-current-count');
+    const statusContainer = document.getElementById('vtp-status-container');
+    const statusEl        = document.getElementById('vtp-status-text');
+    const progressBarEl   = document.getElementById('vtp-real-progress-bar');
+    const progressTextEl  = document.getElementById('vtp-progress-text');
+    const historyListEl   = document.getElementById('vtp-history-list');
+    const pauseBtn        = document.getElementById('vtp-btn-pause');
 
-    // ── Tab switching ──
+    // ── Tab switching trong UI overlay ────────────────────────
     const tabs = {
         btnProgress:  document.getElementById('vtp-tab-progress'),
         btnHistory:   document.getElementById('vtp-tab-history'),
@@ -303,7 +405,7 @@
     function switchTab(active) {
         ['Progress', 'History', 'Settings'].forEach(name => {
             const isActive = name === active;
-            tabs['view' + name].style.display        = isActive ? 'block' : 'none';
+            tabs['view' + name].style.display           = isActive ? 'block' : 'none';
             tabs['btn'  + name].style.borderBottomColor = isActive ? '#00857f' : 'transparent';
             tabs['btn'  + name].style.color             = isActive ? '#00857f' : '#6c757d';
         });
@@ -313,14 +415,13 @@
     tabs.btnHistory.onclick  = () => switchTab('History');
     tabs.btnSettings.onclick = () => switchTab('Settings');
 
-    // ── Prefix settings ──
+    // ── Prefix settings ────────────────────────────────────────
     const prefixListEl  = document.getElementById('vtp-prefix-list');
     const inputPrefixEl = document.getElementById('vtp-input-prefix');
 
     function renderPrefixes() {
         if (!window.VTPSettings) return;
         prefixListEl.innerHTML = '';
-        // Dùng DocumentFragment để tránh nhiều lần layout reflow
         const frag = document.createDocumentFragment();
         window.VTPSettings.getPrefixes().forEach(prefix => {
             const tag = document.createElement('div');
@@ -329,7 +430,6 @@
             frag.appendChild(tag);
         });
         prefixListEl.appendChild(frag);
-
         prefixListEl.querySelectorAll('.vtp-prefix-remove').forEach(btn => {
             btn.onclick = (e) => {
                 window.VTPSettings.removePrefix(e.target.getAttribute('data-val'));
@@ -343,21 +443,21 @@
             inputPrefixEl.value = '';
             renderPrefixes();
         } else {
-            window.VTPNotification.show('Mã trống hoặc đã tồn tại!', 'error');
+            window.VTPNotification?.show('Mã trống hoặc đã tồn tại!', 'error');
         }
     };
     renderPrefixes();
 
-    // ── Pause / Stop / Export ──
+    // ── Pause / Stop / Export ──────────────────────────────────
     pauseBtn.onclick = () => {
         isPaused = !isPaused;
         if (isPaused) {
-            pauseBtn.textContent     = 'Tiếp tục';
+            pauseBtn.textContent      = 'Tiếp tục';
             pauseBtn.style.background = '#007bff';
             pauseBtn.style.color      = 'white';
             statusEl.textContent      = 'Đã tạm dừng';
         } else {
-            pauseBtn.textContent     = 'Tạm dừng';
+            pauseBtn.textContent      = 'Tạm dừng';
             pauseBtn.style.background = '#ffc107';
             pauseBtn.style.color      = '#212529';
         }
@@ -366,11 +466,12 @@
     document.getElementById('vtp-btn-close').onclick = () => {
         isStopped = true;
         extUI.remove();
+        window.__VTP_CORE_SCAN_RUNNING__ = false;
     };
 
     document.getElementById('vtp-btn-export').onclick = () => {
         if (exportDataArray.length === 0) {
-            return window.VTPNotification.show('Chưa có dữ liệu!', 'warning');
+            return window.VTPNotification?.show('Chưa có dữ liệu!', 'warning');
         }
         let csv = '\uFEFFSTT,Mã Kiện,Trạng Thái,Thời Gian Quét,Vị Trí\n';
         exportDataArray.forEach(r => {
@@ -389,14 +490,12 @@
         const item = document.createElement('div');
         item.innerHTML = html;
         historyListEl.prepend(item);
-
-        // Fix memory leak: xóa mục cuối khi vượt quá giới hạn
         while (historyListEl.children.length > MAX_HISTORY) {
             historyListEl.removeChild(historyListEl.lastChild);
         }
     }
 
-    // ── Helper: cập nhật thanh tiến trình ──
+    // ── Helper: cập nhật thanh tiến trình ─────────────────────
     function updateProgress(done, total) {
         const pct = total === 0 ? 0 : Math.round((done / total) * 100);
         progressBarEl.style.width  = pct + '%';
@@ -405,39 +504,33 @@
 
     await new Promise(r => setTimeout(r, 600));
 
-    // ════════════════════════════════════════
-    //  VÒNG LẶP XỬ LÝ CHÍNH
-    // ════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════
+    //  VÒNG LẶP XỬ LÝ CHÍNH (TH1)
+    // ════════════════════════════════════════════════════════════
     while (!isStopped) {
-        // Chờ nếu đang pause
         while (isPaused && !isStopped) await new Promise(r => setTimeout(r, 200));
         if (isStopped) break;
 
-        // ── Lấy mã trên trang (một lần duy nhất mỗi vòng) ──
+        // Lấy mã trên trang (một lần duy nhất mỗi vòng)
         const allCodesOnPage = getValidCodes();
 
         // Khởi tạo tổng mã trang mới
         if (totalOnPage === 0) totalOnPage = allCodesOnPage.length;
 
-        // Fix O(n²): Thay vì .filter() lại toàn bộ Set mỗi vòng,
-        // dùng vòng for để tìm phần tử đầu tiên chưa quét → O(n) worst case
+        // Tìm mã đầu tiên chưa quét — O(n) worst case
         let target = null;
         for (const item of allCodesOnPage) {
-            if (!processedCodeSet.has(item.code)) {
-                target = item;
-                break;
-            }
+            if (!processedCodeSet.has(item.code)) { target = item; break; }
         }
 
-        const processedOnPage = totalOnPage - (target ? allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length : 0);
+        const remaining      = target ? allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length : 0;
+        const processedOnPage = totalOnPage - remaining;
         updateProgress(processedOnPage, totalOnPage);
 
-        // ── Không còn mã chưa quét trên trang → lật trang ──
+        // Không còn mã chưa quét trên trang → lật trang
         if (!target) {
             statusEl.textContent = 'Đang lật trang...';
-
-            // Fix double getValidCodes(): Dùng allCodesOnPage đã có (không gọi lại)
-            const oldFirstCode = allCodesOnPage.length > 0 ? allCodesOnPage[0].code : '';
+            const oldFirstCode   = allCodesOnPage.length > 0 ? allCodesOnPage[0].code : '';
 
             if (clickNextPage()) {
                 currentPage++;
@@ -446,26 +539,25 @@
                 } else {
                     await new Promise(r => setTimeout(r, 3000));
                 }
-                // Reset bộ đếm trang
                 totalOnPage = 0;
                 continue;
             } else {
-                // Hết trang → hoàn thành
+                // Hết trang → thoát vòng lặp để bấm Hoàn thành
                 progressBarEl.style.width = '100%';
                 break;
             }
         }
 
-        // ── Xử lý mã ──
-        if (isStopped) break; // Guard trước khi bắt đầu xử lý
+        // Xử lý mã
+        if (isStopped) break;
         const { element, code } = target;
         processedCodeSet.add(code);
         processedCount++;
 
-        countEl.textContent                  = processedCount;
-        statusContainer.style.background     = '#e8f4f8';
-        statusContainer.style.borderColor    = '#b8daff';
-        statusEl.innerHTML                   = `Trang ${currentPage} - Đang xử lý: <b style="letter-spacing:0.5px;">${code}</b>`;
+        countEl.textContent               = processedCount;
+        statusContainer.style.background  = '#e8f4f8';
+        statusContainer.style.borderColor = '#b8daff';
+        statusEl.innerHTML                = `Trang ${currentPage} - Đang xử lý: <b style="letter-spacing:0.5px;">${code}</b>`;
 
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
         element.style.backgroundColor = '#ffc107';
@@ -501,11 +593,11 @@
             }
         }
 
-        if (isStopped) break; // Guard sau await dài
+        if (isStopped) break;
 
-        // ── Cập nhật UI sau khi quét xong 1 mã ──
-        const timeScanned  = new Date().toLocaleTimeString();
-        const totalDone    = totalOnPage - allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length;
+        // Cập nhật UI sau khi quét xong 1 mã
+        const timeScanned = new Date().toLocaleTimeString();
+        const totalDone   = totalOnPage - allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length;
         updateProgress(totalDone, totalOnPage);
 
         if (!isSuccess) {
@@ -522,13 +614,12 @@
         }
 
         tabs.btnHistory.textContent = `Lịch Sử (${processedCount})`;
-
         if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(150);
     }
 
     // ════════════════════════════════════════════════════════════
-    //  TRƯỜNG HỢP 1 – HOÀN THÀNH: Đã scan xong toàn bộ mã
-    //  → Click Hoàn thành → đợi 2s → F5 → tuyến tiếp theo
+    //  TH1 – HOÀN THÀNH: Đã scan xong toàn bộ mã
+    //  → Click Hoàn thành → đợi 2s → F5 → sidepanel chuyển tuyến tiếp
     // ════════════════════════════════════════════════════════════
     if (!isStopped) {
         progressBarEl.style.width        = '100%';
@@ -538,16 +629,20 @@
         statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm! Đang bấm Hoàn thành...`;
         pauseBtn.style.display           = 'none';
 
-        // Click nút "Hoàn thành" sau khi quét xong toàn bộ mã
         const clicked = await clickHoanThanh();
         if (!clicked) {
-            console.warn('[VTP Core Scan] ⚠️ Không tìm thấy nút Hoàn thành – tiếp tục báo xong');
+            console.warn('[VTP Core] ⚠️ Không tìm thấy nút Hoàn thành');
         }
 
-        // Báo hiệu cho sidepanel, đợi 2s rồi F5 → chuyển tuyến tiếp theo
+        // Báo hiệu cho sidepanel → đợi 2s → F5
         window.__VTP_SCAN_COMPLETE__ = true;
-        console.log('[VTP Core Scan] ✅ Scan hoàn tất – đã set __VTP_SCAN_COMPLETE__ = true. Đang đợi 2s rồi F5...');
+        console.log('[VTP Core] ✅ Scan hoàn tất – __VTP_SCAN_COMPLETE__ = true. Đợi 2s rồi F5...');
         await new Promise(r => setTimeout(r, 2000));
+        window.__VTP_CORE_SCAN_RUNNING__ = false;
         location.reload();
+    } else {
+        window.__VTP_CORE_SCAN_RUNNING__ = false;
     }
+
 })();
+}
