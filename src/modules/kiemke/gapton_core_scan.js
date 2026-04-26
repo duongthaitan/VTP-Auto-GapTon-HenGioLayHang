@@ -1,14 +1,15 @@
 // ============================================================
 //  VTP Tool – Kiểm Tồn Core Scan
-//  v1.3 Reliability Fix
-//    TH1: Tab "chưa kiểm kê" có mã → scan tự động → click Hoàn thành → 2s → F5
-//    TH2: Tab "chưa kiểm kê" trống → click Hoàn thành → 2s → F5
+//  v1.4 Critical Fix – Persistent Scan Signal
+//    TH1: Tab "chưa kiểm kê" có mã → scan tự động → click Hoàn thành → F5
+//    TH2: Tab "chưa kiểm kê" trống → click Hoàn thành → F5
 //
-//  Thay đổi so với v1.2:
+//  Thay đổi so với v1.3:
+//    [!] BUG FIX: Dùng chrome.storage.local thay vì window variable
+//        để báo hiệu scan xong → signal tồn tại qua reload
+//        (window.* bị xóa sạch khi location.reload())
 //    [+] waitForTabContentReady(): Chờ nội dung tab load đúng cách
-//        thay vì setTimeout cứng 1s → tránh false-positive TH2
 //    [+] isUnscannedTabEmpty(): Kiểm tra visibility của <td> cha
-//        (.z-listbox-emptybody-content có thể tồn tại nhưng bị ẩn)
 //    [+] Hỗ trợ nhiều selector empty-state (ZK + test server)
 //    [+] Guard chống inject lại khi scan đang chạy
 // ============================================================
@@ -293,9 +294,15 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         await clickHoanThanh();
 
         // Báo hiệu scan xong → sidepanel sẽ chuyển tuyến tiếp
-        window.__VTP_SCAN_COMPLETE__      = true;
+        // [v1.4] Dùng chrome.storage.local — tồn tại qua reload
         window.__VTP_CORE_SCAN_RUNNING__  = false;
-        console.log('[VTP Core] ✅ __VTP_SCAN_COMPLETE__ = true (TH2: tab trống). Đợi 2s rồi F5...');
+        try {
+            await chrome.storage.local.set({ __VTP_SCAN_COMPLETE__: true });
+            console.log('[VTP Core] ✅ storage.__VTP_SCAN_COMPLETE__ = true (TH2: tab trống)');
+        } catch (e) {
+            console.warn('[VTP Core] Không thể ghi storage:', e);
+        }
+        console.log('[VTP Core] Đợi 2s rồi F5...');
         await new Promise(r => setTimeout(r, 2000)); // Đợi 2s
         location.reload();                            // F5 → sidepanel chuyển tuyến tiếp
         return;
@@ -643,9 +650,15 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         }
 
         // Báo hiệu cho sidepanel → đợi 2s → F5
-        window.__VTP_SCAN_COMPLETE__     = true;
+        // [v1.4] Dùng chrome.storage.local — tồn tại qua reload
         window.__VTP_CORE_SCAN_RUNNING__ = false;
-        console.log('[VTP Core] ✅ Scan hoàn tất – __VTP_SCAN_COMPLETE__ = true. Đợi 2s rồi F5...');
+        try {
+            await chrome.storage.local.set({ __VTP_SCAN_COMPLETE__: true });
+            console.log('[VTP Core] ✅ storage.__VTP_SCAN_COMPLETE__ = true (TH1: scan xong)');
+        } catch (e) {
+            console.warn('[VTP Core] Không thể ghi storage:', e);
+        }
+        console.log('[VTP Core] Đợi 2s rồi F5...');
         await new Promise(r => setTimeout(r, 2000));
         location.reload();
     } else {

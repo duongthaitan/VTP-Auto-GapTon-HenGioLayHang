@@ -1,12 +1,12 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v2.2 Bug Fixes & Optimizations:
+//  v2.3 Critical Fix:
+//    - Fix #21: Dùng chrome.storage.local thay vì window variable
+//              để nhận tín hiệu scan xong (tồn tại qua reload)
 //    - Fix #17: Double F5 — bỏ location.reload() thừa ở bước J
-//               (gapton_core_scan đã tự reload, sidepanel chỉ cần chờ)
 //    - Fix #18: Poll timeout 30 phút → 10 phút (600000ms)
-//    - Fix #19: SPA poller detect TH1 (input.clsinputpg) VÀ TH2 (tab trống)
-//    - Fix #20: reloadAfterScanPromise đăng ký TRƯỚC inject để không miss reload
-//  v2.1 Changes: Fix #1–#16 (xem git log)
+//    - Fix #19: SPA poller detect TH1 VÀ TH2
+//    - Fix #20: reloadAfterScanPromise đăng ký TRƯỚC inject
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
 
@@ -568,50 +568,52 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }, 1000);
 
-        // ── Helper: poll biến global trên trang (Fix #16: cleanup khi tab bị đóng) ──
-        function pollPageVar(tabId, varName, intervalMs, timeoutMs) {
+        // ── Helper: chờ tín hiệu scan xong qua chrome.storage.local ──
+        // [Fix #21] Dùng storage thay vì window variable → tồn tại qua reload
+        function pollScanComplete(timeoutMs = 600000) {
             return new Promise((resolve) => {
-                const start = Date.now();
                 let resolved = false;
-                const tabRemovedListener = (removedTabId) => {
-                    if (removedTabId !== tabId || resolved) return;
-                    resolved = true;
-                    chrome.tabs.onRemoved.removeListener(tabRemovedListener);
-                    console.warn('[VTP] Tab bị đóng — hủy poll');
-                    resolve(null);
-                };
-                chrome.tabs.onRemoved.addListener(tabRemovedListener);
-                const check = async () => {
+
+                // Xóa cờ cũ trước khi bắt đầu lắng nghe
+                chrome.storage.local.remove('__VTP_SCAN_COMPLETE__');
+
+                const deadline = setTimeout(() => {
                     if (resolved) return;
-                    try {
-                        const res = await chrome.scripting.executeScript({
-                            target: { tabId }, world: 'MAIN',
-                            func: (v) => window[v] || null, args: [varName]
-                        });
-                        const val = res?.[0]?.result;
-                        if (val && !resolved) {
-                            resolved = true;
-                            chrome.tabs.onRemoved.removeListener(tabRemovedListener);
-                            resolve(val); return;
-                        }
-                    } catch (_) {}
-                    if (Date.now() - start >= timeoutMs) {
-                        if (!resolved) { resolved = true; chrome.tabs.onRemoved.removeListener(tabRemovedListener); resolve(null); }
-                        return;
+                    resolved = true;
+                    chrome.storage.onChanged.removeListener(listener);
+                    console.warn('[VTP] pollScanComplete: timeout sau', timeoutMs, 'ms');
+                    resolve(false);
+                }, timeoutMs);
+
+                function listener(changes, namespace) {
+                    if (namespace !== 'local' || resolved) return;
+                    if (changes.__VTP_SCAN_COMPLETE__?.newValue === true) {
+                        resolved = true;
+                        clearTimeout(deadline);
+                        chrome.storage.onChanged.removeListener(listener);
+                        console.log('[VTP] ✅ Nhận tín hiệu __VTP_SCAN_COMPLETE__ từ storage!');
+                        resolve(true);
                     }
-                    setTimeout(check, intervalMs);
-                };
-                setTimeout(check, intervalMs);
+                }
+                chrome.storage.onChanged.addListener(listener);
+
+                // Backup: kiểm tra ngay lập tức (phòng trường hợp storage đã được set trước khi listener đăng ký)
+                chrome.storage.local.get('__VTP_SCAN_COMPLETE__', (data) => {
+                    if (data.__VTP_SCAN_COMPLETE__ === true && !resolved) {
+                        resolved = true;
+                        clearTimeout(deadline);
+                        chrome.storage.onChanged.removeListener(listener);
+                        console.log('[VTP] ✅ __VTP_SCAN_COMPLETE__ đã có sẵn trong storage!');
+                        resolve(true);
+                    }
+                });
             });
         }
 
-        // ── Helper: xóa biến global trên trang ──
-        async function clearPageVar(tabId, varName) {
+        // ── Helper: xóa tín hiệu scan trong storage ──
+        async function clearScanComplete() {
             try {
-                await chrome.scripting.executeScript({
-                    target: { tabId }, world: 'MAIN',
-                    func: (v) => { delete window[v]; }, args: [varName]
-                });
+                await chrome.storage.local.remove('__VTP_SCAN_COMPLETE__');
             } catch (_) {}
         }
 
@@ -802,16 +804,21 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // H: Inject gapton_core_scan
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
                 console.log('[VTP] Inject gapton_core_scan.js...');
+
+                // [Fix #21] Xóa signal cũ TRƯỚC khi inject scan script
+                await clearScanComplete();
+
                 await chrome.scripting.executeScript({
                     target: { tabId: mainTabId }, world: 'MAIN',
                     files: ['src/shared/notification.js', 'src/modules/kiemke/gapton_settings.js', 'src/modules/kiemke/gapton_smart_delay.js', 'src/modules/kiemke/gapton_core_scan.js']
                 });
 
-                // I: Poll __VTP_SCAN_COMPLETE__ (timeout 10 phút)
+                // I: Chờ tín hiệu scan xong từ chrome.storage.local (timeout 10 phút)
+                // [Fix #21] Dùng storage listener thay vì poll window variable
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ quét xong: ${route}...`;
-                console.log('[VTP] Chờ __VTP_SCAN_COMPLETE__...');
-                const scanDone = await pollPageVar(mainTabId, '__VTP_SCAN_COMPLETE__', 3000, 600000); // [Fix #18] 10 phút thay vì 30 phút
-                await clearPageVar(mainTabId, '__VTP_SCAN_COMPLETE__');
+                console.log('[VTP] Chờ __VTP_SCAN_COMPLETE__ từ storage...');
+                const scanDone = await pollScanComplete(600000);
+                await clearScanComplete();
 
                 if (!scanDone) {
                     console.warn('[VTP] Scan timeout tuyến:', route);
@@ -824,15 +831,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // J: Chờ trang tự reload — gapton_core_scan đã gọi location.reload() sau 2s
                 //    [Fix #17] KHÔNG gọi location.reload() thêm → tránh double F5
-                //    reloadAfterScanPromise đã đăng ký trước inject → không miss event
                 if (i < selectedRoutes.length - 1 && !cancelToken.cancelled) {
                     routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ tải lại trang...`;
                     if (scanDone) {
-                        // Scan OK: gapton_core_scan tự reload sau 2s → chỉ cần chờ
+                        // Scan OK: gapton_core_scan tự reload → chờ tab complete
                         await reloadAfterScanPromise;
                     } else {
-                        // Scan thất bại / timeout: gapton_core_scan có thể không reload
-                        // → chủ động reload để tuyến tiếp theo có trạng thái sạch
+                        // Scan thất bại / timeout → chủ động reload
                         const manualP = waitForTabReload(mainTabId, '', 20000);
                         try {
                             await chrome.scripting.executeScript({
