@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         startRunning: `<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><path d="M21 12a9 9 0 11-3.36-7.02"/></svg> Đang chạy…`,
         kiemkePlay:   `<svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><polygon points="4 2.5 17 10 4 17.5"/></svg> Chạy Kiểm Kê Tự Động`,
         kiemkeRun:    `<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><path d="M21 12a9 9 0 11-3.36-7.02"/></svg> Đang kiểm kê...`,
-        gaptonPlay:   `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15"><path d="M17.5 13.3V6.7a1.7 1.7 0 00-.83-1.44L10.83 1.9a1.7 1.7 0 00-1.66 0L3.33 5.26A1.7 1.7 0 002.5 6.7v6.6a1.7 1.7 0 00.83 1.44l5.84 3.36a1.7 1.7 0 001.66 0l5.84-3.36A1.7 1.7 0 0017.5 13.3z"/></svg> Quét Mã Kiểm Tồn`,
+        gaptonPlay:   `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15"><path d="M17.5 13.3V6.7a1.7 1.7 0 00-.83-1.44L10.83 1.9a1.7 1.7 0 00-1.66 0L3.33 5.26A1.7 1.7 0 002.5 6.7v6.6a1.7 1.7 0 00.83 1.44l5.84 3.36a1.7 1.7 0 001.66 0l5.84-3.36A1.7 1.7 0 0017.5 13.3z"/></svg> Quét Mã Thủ Công`,
     };
 
     // ════════════════════════════════════════
@@ -796,8 +796,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 console.log('[VTP] ✅ Trang scan đã mở');
 
-                // Buffer nhỏ để trang render đầy đủ
-                await new Promise(r => setTimeout(r, 2500));
+                // Buffer nhỏ để trang render đầy đủ (tối ưu từ 2500ms)
+                await new Promise(r => setTimeout(r, 1000));
 
                 // H: Inject gapton_core_scan
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
@@ -848,7 +848,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                         } catch (_) {}
                         await manualP;
                     }
-                    await new Promise(r => setTimeout(r, 1500));
+                    await new Promise(r => setTimeout(r, 500)); // Tối ưu từ 1500ms
                 }
 
             } catch (e) {
@@ -875,7 +875,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (i < selectedRoutes.length - 1 && !cancelToken.cancelled) {
                 routeProgressStatus.textContent = `✔️ Xong tuyến ${i + 1}. Chuyển sang tuyến ${i + 2}: ${selectedRoutes[i + 1]}...`;
-                await new Promise(r => setTimeout(r, 1500));
+                await new Promise(r => setTimeout(r, 500)); // Tối ưu từ 1500ms
             }
         }
 

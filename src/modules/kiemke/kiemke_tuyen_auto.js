@@ -18,9 +18,9 @@ window.__VTP_KIEMKE_RUNNING__ = true;
     'use strict';
 
     const STEP_TIMEOUT = 15000; // Timeout chờ 1 element xuất hiện
-    const STEP_DELAY   = 1500;  // Delay giữa các bước
-    const POPUP_WAIT   = 2000;  // Chờ dropdown mở
-    const DIALOG_WAIT  = 3000;  // Chờ dialog xuất hiện
+    const STEP_DELAY   = 500;   // Delay giữa các bước (tối ưu từ 1500)
+    const POPUP_WAIT   = 800;   // Chờ dropdown mở (tối ưu từ 2000)
+    const DIALOG_WAIT  = 1000;  // Chờ dialog xuất hiện (tối ưu từ 3000)
 
     const routeName = window.__VTP_SELECTED_ROUTE__;
     if (!routeName) {
@@ -132,7 +132,7 @@ window.__VTP_KIEMKE_RUNNING__ = true;
 
         // Chờ loading indicator biến mất sau khi tìm kiếm
         await waitForLoadingDone(STEP_TIMEOUT);
-        await sleep(800);
+        await sleep(300); // Tối ưu từ 800ms
 
         // ════ BƯỚC 4: Click "Kiểm kê" ════
         notify('Bước 4/5: Click "Kiểm kê"...', 'info');

@@ -87,7 +87,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
             const refreshLi = parentLi || clickTarget.closest('li.z-tab');
             if (refreshLi && refreshLi.classList.contains('z-tab-selected')) {
                 console.log('[VTP Core] ✅ Tab chưa kiểm kê đã chuyển (z-tab-selected)');
-                await new Promise(r => setTimeout(r, 1000)); // Buffer render
+                await new Promise(r => setTimeout(r, 500)); // Buffer render (tối ưu từ 1000ms)
                 return true;
             }
         }
@@ -193,11 +193,29 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
     }
 
     // ════════════════════════════════════════════════════════════
-    //  HELPER: Lấy danh sách mã hợp lệ trên trang
+    //  HELPER: Lấy tab panel đang active
+    //  ZK Framework giữ cả 2 tab trong DOM → phải scope query
+    //  để CHỈ đọc mã từ tab "chưa kiểm kê", bỏ qua "đã kiểm kê"
+    // ════════════════════════════════════════════════════════════
+    function getActiveTabPanel() {
+        const panels = document.querySelectorAll('.z-tabpanel');
+        for (const p of panels) {
+            if (p.style.display === 'none') continue;
+            const computed = getComputedStyle(p).display;
+            if (computed === 'none') continue;
+            // Panel phải có nội dung listbox
+            if (p.querySelector('.z-listbox, .z-listcell-content')) return p;
+        }
+        return null; // Fallback → dùng document
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  HELPER: Lấy danh sách mã hợp lệ (CHỈ từ tab "chưa kiểm kê")
     //  Dùng Set để deduplicate (tránh ZK render trùng)
     // ════════════════════════════════════════════════════════════
     function getValidCodes() {
-        const cells         = document.querySelectorAll('.z-listcell-content');
+        const container     = getActiveTabPanel() || document;
+        const cells         = container.querySelectorAll('.z-listcell-content');
         const validPrefixes = window.VTPSettings
             ? window.VTPSettings.getPrefixes()
             : ['SHOPEE', 'VTP', 'VGI', 'PKE', 'KMS', 'PSL', 'TPO'];
@@ -264,7 +282,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
     //  MAIN FLOW – BƯỚC 1: Switch sang tab "chưa kiểm kê"
     // ════════════════════════════════════════════════════════════
     await switchToUnscannedTab();
-    await new Promise(r => setTimeout(r, 800)); // Buffer render sau tab switch
+    await new Promise(r => setTimeout(r, 300)); // Buffer render sau tab switch (tối ưu từ 800ms)
 
     // ════════════════════════════════════════════════════════════
     //  MAIN FLOW – BƯỚC 2: Xác định trạng thái tab
@@ -290,7 +308,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         console.log('[VTP Core] TH2 –', msg);
         if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
 
-        await new Promise(r => setTimeout(r, 1500)); // Đợi trang ổn định
+        await new Promise(r => setTimeout(r, 500)); // Đợi trang ổn định (tối ưu từ 1500ms)
         await clickHoanThanh();
 
         // Báo hiệu scan xong → sidepanel sẽ chuyển tuyến tiếp
@@ -303,7 +321,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
             console.warn('[VTP Core] Không thể ghi storage:', e);
         }
         console.log('[VTP Core] Đợi 2s rồi F5...');
-        await new Promise(r => setTimeout(r, 2000)); // Đợi 2s
+        await new Promise(r => setTimeout(r, 800)); // Đợi trước F5 (tối ưu từ 2000ms)
         location.reload();                            // F5 → sidepanel chuyển tuyến tiếp
         return;
     }
@@ -331,7 +349,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
 
     // Tắt event jQuery can thiệp vào input
     if (typeof $ !== 'undefined') $(inputField).off('cut copy paste keypress');
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 200)); // Tối ưu từ 800ms
 
     // ── Xây UI overlay (xóa instance cũ nếu có) ──────────────
     let extUI = document.getElementById('vtp-auto-ext-ui');
@@ -517,7 +535,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         progressTextEl.textContent = `${done} / ${total} mã (Trang ${currentPage})`;
     }
 
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 200)); // Tối ưu từ 600ms
 
     // ════════════════════════════════════════════════════════════
     //  VÒNG LẶP XỬ LÝ CHÍNH (TH1)
@@ -574,7 +592,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         statusContainer.style.borderColor = '#b8daff';
         statusEl.innerHTML                = `Trang ${currentPage} - Đang xử lý: <b style="letter-spacing:0.5px;">${code}</b>`;
 
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.scrollIntoView({ behavior: 'instant', block: 'nearest' });
         element.style.backgroundColor = '#ffc107';
         inputField.focus();
 
@@ -619,7 +637,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
             element.style.backgroundColor = '#dc3545';
             addHistoryItem(`<span style="color:#dc3545;font-weight:600;">${code} (Lỗi / Timeout)</span>`);
             exportDataArray.push({ stt: processedCount, code, page: currentPage, time: timeScanned, status: 'Lỗi / Timeout' });
-            if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(300);
+            if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(100); // Tối ưu từ 300ms
         } else {
             addHistoryItem(
                 `<span style="color:#28a745;font-weight:600;">${code} ` +
@@ -629,7 +647,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         }
 
         tabs.btnHistory.textContent = `Lịch Sử (${processedCount})`;
-        if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(150);
+        if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(50); // Tối ưu từ 150ms
     }
 
     // ════════════════════════════════════════════════════════════
@@ -658,8 +676,8 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         } catch (e) {
             console.warn('[VTP Core] Không thể ghi storage:', e);
         }
-        console.log('[VTP Core] Đợi 2s rồi F5...');
-        await new Promise(r => setTimeout(r, 2000));
+        console.log('[VTP Core] Đợi trước F5...');
+        await new Promise(r => setTimeout(r, 800)); // Tối ưu từ 2000ms
         location.reload();
     } else {
         window.__VTP_CORE_SCAN_RUNNING__ = false;
