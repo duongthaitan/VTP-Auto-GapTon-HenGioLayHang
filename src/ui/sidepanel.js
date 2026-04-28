@@ -1,14 +1,13 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v2.4 Critical Fix:
-//    - Fix #22: Race condition pollScanComplete — đăng ký listener
-//              TRƯỚC khi inject scan script (không phải sau), tránh miss
-//              tín hiệu khi script scan chạy xong trước khi listener kịp gắn.
-//              KHÔNG remove signal trong pollScanComplete, chỉ clearScanComplete()
-//              trước khi đăng ký poll. Tăng reload timeout 35s → 60s.
-//    - Fix #21: Dùng chrome.storage.local thay vì window variable
-//              để nhận tín hiệu scan xong (tồn tại qua reload)
-//    - Fix #17: Double F5 — bỏ location.reload() thừa ở bước J
+//  v2.5 Critical Fix:
+//    - Fix #23: chrome.storage.local.set() KHÔNG hoạt động từ world:'MAIN'
+//              (Chrome MV3 không cấp Extension API cho MAIN world scripts)
+//              → Thay bằng waitForTabReload: gapton_core_scan LUÔN gọi
+//              location.reload() khi xong → tab reload = tín hiệu scan done
+//    - Fix #22: pollScanComplete đăng ký TRƯỚC inject (giữ lại backup)
+//    - Fix #21: chrome.storage.local thay vì window variable
+//    - Fix #17: Bỏ double F5
 //    - Fix #20: reloadAfterScanPromise đăng ký TRƯỚC inject
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
@@ -800,58 +799,46 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // Buffer nhỏ để trang render đầy đủ
                 await new Promise(r => setTimeout(r, 2500));
 
-                // [Fix #17+#20] Đăng ký reloadAfterScanPromise TRƯỚC khi inject gapton_core_scan
-                // gapton_core_scan tự gọi location.reload() sau 2s khi scan xong
-                // → phải đăng ký trước để không miss sự kiện reload
-                const reloadAfterScanPromise = (i < selectedRoutes.length - 1 && !cancelToken.cancelled)
-                    ? waitForTabReload(mainTabId, '', 60000)
-                    : Promise.resolve(true);
-
                 // H: Inject gapton_core_scan
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
                 console.log('[VTP] Inject gapton_core_scan.js...');
 
-                // [Fix #22] Xóa signal cũ TRƯỚC khi inject VÀ TRƯỚC khi đăng ký poll
-                // Thứ tự đúng: clearScanComplete → pollScanComplete → inject script
-                // Nếu đăng ký poll TRƯỚC khi xóa signal → có thể nhận tín hiệu cũ từ lần trước
-                // Nếu đăng ký poll SAU khi inject → script có thể set signal trước khi poll lắng nghe
-                await clearScanComplete();
-
-                // [Fix #22] Đăng ký pollScanComplete NGAY TRƯỚC inject (không phải sau inject)
-                // → Đảm bảo listener đã sẵn sàng trước khi gapton_core_scan.js chạy
-                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ quét xong: ${route}...`;
-                console.log('[VTP] Đăng ký pollScanComplete TRƯỚC inject...');
-                const scanDonePromise = pollScanComplete(600000);
+                // [Fix #23] Dùng waitForTabReload thay vì chrome.storage signal
+                // Lý do: chrome.storage.local.set() KHÔNG hoạt động trong world:'MAIN'
+                //        (Chrome MV3: MAIN world không có quyền truy cập Extension APIs)
+                // gapton_core_scan.js LUÔN gọi location.reload() khi xong (cả TH1 và TH2)
+                // → Tab reload chính là tín hiệu "quét xong" đáng tin cậy nhất
+                // PHẢI đăng ký TRƯỚC inject để không bỏ lỡ sự kiện reload
+                await clearScanComplete(); // dọn signal cũ (backward compat)
+                const scanCompleteViaReload = waitForTabReload(mainTabId, '', 660000); // 11 phút
 
                 await chrome.scripting.executeScript({
                     target: { tabId: mainTabId }, world: 'MAIN',
                     files: ['src/shared/notification.js', 'src/modules/kiemke/gapton_settings.js', 'src/modules/kiemke/gapton_smart_delay.js', 'src/modules/kiemke/gapton_core_scan.js']
                 });
-                console.log('[VTP] Inject gapton_core_scan.js xong. Đang chờ tín hiệu scan complete...');
+                console.log('[VTP] Inject gapton_core_scan.js xong. Chờ tab reload (tín hiệu scan done)...');
 
-                // I: Chờ tín hiệu scan xong từ chrome.storage.local (timeout 10 phút)
-                // [Fix #22] scanDonePromise đã được đăng ký trước inject → không miss signal
-                const scanDone = await scanDonePromise;
-                await clearScanComplete();
+                // I: Chờ tab reload = scan xong
+                // gapton_core_scan gọi location.reload() → tab fires status:'complete'
+                routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ quét xong: ${route}...`;
+                const scanDone = await scanCompleteViaReload;
+                // Tab đã reload hoàn tất tại đây
 
                 if (!scanDone) {
                     console.warn('[VTP] Scan timeout tuyến:', route);
-                    errors.push({ route, error: 'Scan timeout' });
-                    setRouteStatus(route, 'error'); // Fix #4
+                    errors.push({ route, error: 'Scan timeout sau 11 phút' });
+                    setRouteStatus(route, 'error');
                 } else {
-                    console.log('[VTP] ✅ Scan xong:', route);
-                    setRouteStatus(route, 'done');  // Fix #4
+                    console.log('[VTP] ✅ Scan xong (tab đã reload):', route);
+                    setRouteStatus(route, 'done');
                 }
 
-                // J: Chờ trang tự reload — gapton_core_scan đã gọi location.reload() sau 2s
-                //    [Fix #17] KHÔNG gọi location.reload() thêm → tránh double F5
+                // J: Tab đã tự reload sau scan → KHÔNG waitForTabReload thêm
+                // Chỉ cần chờ ổn định, vòng tiếp theo gọi waitForListPageReady
                 if (i < selectedRoutes.length - 1 && !cancelToken.cancelled) {
-                    routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ tải lại trang...`;
-                    if (scanDone) {
-                        // Scan OK: gapton_core_scan tự reload → chờ tab complete
-                        await reloadAfterScanPromise;
-                    } else {
-                        // Scan thất bại / timeout → chủ động reload
+                    if (!scanDone) {
+                        // Timeout: chủ động reload để vòng tiếp theo có trang sạch
+                        routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang reload trang...`;
                         const manualP = waitForTabReload(mainTabId, '', 20000);
                         try {
                             await chrome.scripting.executeScript({
