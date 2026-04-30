@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>VTP Kiểm Kê Module Test Runner</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: rgba(15, 23, 42, 0.84);
+            --card: rgba(30, 41, 59, 0.86);
+            --border: rgba(148, 163, 184, 0.18);
+            --text: #e5edf7;
+            --muted: #94a3b8;
+            --green: #22c55e;
+            --red: #ef4444;
+            --amber: #f59e0b;
+            --cyan: #06b6d4;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(238, 0, 51, 0.24), transparent 34rem),
+                radial-gradient(circle at top right, rgba(6, 182, 212, 0.2), transparent 30rem),
+                linear-gradient(135deg, #020617 0%, #111827 48%, #1e1b4b 100%);
+            padding: 32px;
+        }
+        .shell { max-width: 1120px; margin: 0 auto; }
+        .hero {
+            padding: 28px;
+            border: 1px solid var(--border);
+            border-radius: 28px;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(30, 41, 59, 0.58));
+            box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+            backdrop-filter: blur(18px);
+        }
+        .eyebrow { color: #fda4af; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; font-size: 12px; }
+        h1 { margin: 10px 0 8px; font-size: clamp(30px, 4vw, 52px); line-height: 1; }
+        .sub { color: var(--muted); max-width: 760px; line-height: 1.6; }
+        .toolbar { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 22px; }
+        button {
+            border: 0;
+            color: white;
+            cursor: pointer;
+            font-weight: 800;
+            border-radius: 14px;
+            padding: 12px 18px;
+            background: linear-gradient(135deg, #ee0033, #fb7185);
+            box-shadow: 0 12px 28px rgba(238, 0, 51, .25);
+            transition: transform .18s ease, filter .18s ease;
+        }
+        button:hover { transform: translateY(-1px); filter: brightness(1.06); }
+        button.secondary { background: linear-gradient(135deg, #0891b2, #22d3ee); box-shadow: 0 12px 28px rgba(6, 182, 212, .2); }
+        .grid { display: grid; grid-template-columns: 340px 1fr; gap: 18px; margin-top: 18px; }
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            background: var(--card);
+            box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+            overflow: hidden;
+        }
+        .card h2 { margin: 0; padding: 18px 20px; font-size: 17px; border-bottom: 1px solid var(--border); }
+        .summary { padding: 18px 20px; display: grid; gap: 14px; }
+        .metric { display:flex; justify-content:space-between; align-items:center; padding: 12px 14px; border-radius: 16px; background: rgba(15, 23, 42, .56); }
+        .metric strong { font-size: 24px; }
+        .pass { color: var(--green); }
+        .fail { color: var(--red); }
+        .pending { color: var(--amber); }
+        #results { padding: 14px; display: grid; gap: 10px; }
+        .test-row { padding: 14px; border-radius: 16px; background: rgba(15, 23, 42, .58); border: 1px solid rgba(148, 163, 184, .12); }
+        .test-head { display:flex; gap:10px; justify-content:space-between; align-items:center; }
+        .test-name { font-weight: 800; }
+        .badge { font-size: 12px; font-weight: 900; padding: 5px 9px; border-radius: 999px; }
+        .badge.pass { background: rgba(34, 197, 94, .14); }
+        .badge.fail { background: rgba(239, 68, 68, .14); }
+        .details { margin-top: 8px; color: var(--muted); line-height: 1.5; font-size: 13px; white-space: pre-wrap; }
+        .sandbox {
+            margin-top: 18px;
+            border: 1px dashed rgba(148, 163, 184, .28);
+            border-radius: 20px;
+            min-height: 260px;
+            background: rgba(255,255,255,.04);
+            padding: 18px;
+            color: #111827;
+        }
+        .z-combobox-popup { display: none; background: white; padding: 8px; border: 1px solid #ddd; margin: 8px 0; }
+        .z-comboitem { padding: 6px 10px; cursor: pointer; }
+        .z-tabpanel { display: block; }
+        .z-listcell-content { padding: 5px; color: #111827; }
+        .empty-state, .z-listbox-emptybody-content { color: #475569; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+<div class="shell">
+    <section class="hero">
+        <div class="eyebrow">VTP Automation QA</div>
+        <h1>Kiểm thử module Kiểm Kê Tuyến & Core Scan</h1>
+        <p class="sub">
+            Test runner này giả lập DOM ZK Framework và chạy trực tiếp logic từ
+            <code>kiemke_tuyen_auto.js</code> + <code>gapton_core_scan.js</code> để kiểm tra các nhánh chính.
+        </p>
+        <div class="toolbar">
+            <button id="runAllBtn">▶ Chạy tất cả test</button>
+            <button class="secondary" id="clearBtn">Xóa kết quả</button>
+        </div>
+    </section>
+
+    <div class="grid">
+        <section class="card">
+            <h2>Tổng kết</h2>
+            <div class="summary">
+                <div class="metric"><span>Passed</span><strong id="passed" class="pass">0</strong></div>
+                <div class="metric"><span>Failed</span><strong id="failed" class="fail">0</strong></div>
+                <div class="metric"><span>Total</span><strong id="total">0</strong></div>
+            </div>
+        </section>
+        <section class="card">
+            <h2>Kết quả chi tiết</h2>
+            <div id="results"></div>
+        </section>
+    </div>
+
+    <div id="sandbox" class="sandbox" aria-label="DOM sandbox"></div>
+</div>
+
+<script>
+(() => {
+    const MODULES = {
+        route: '/src/modules/kiemke/kiemke_tuyen_auto.js',
+        settings: '/src/modules/kiemke/gapton_settings.js',
+        delay: '/src/modules/kiemke/gapton_smart_delay.js',
+        scan: '/src/modules/kiemke/gapton_core_scan.js',
+        notification: '/src/shared/notification.js'
+    };
+
+    const sandbox = document.getElementById('sandbox');
+    const resultsEl = document.getElementById('results');
+    const passedEl = document.getElementById('passed');
+    const failedEl = document.getElementById('failed');
+    const totalEl = document.getElementById('total');
+    let stats = { passed: 0, failed: 0, total: 0 };
+
+    function updateStats() {
+        passedEl.textContent = stats.passed;
+        failedEl.textContent = stats.failed;
+        totalEl.textContent = stats.total;
+    }
+
+    function addResult(name, ok, details = '') {
+        stats.total++;
+        ok ? stats.passed++ : stats.failed++;
+        updateStats();
+        const row = document.createElement('div');
+        row.className = 'test-row';
+        row.innerHTML = `
+            <div class="test-head">
+                <div class="test-name">${escapeHtml(name)}</div>
+                <div class="badge ${ok ? 'pass' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</div>
+            </div>
+            <div class="details">${escapeHtml(details)}</div>
+        `;
+        resultsEl.appendChild(row);
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function assert(condition, message) {
+        if (!condition) throw new Error(message);
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function resetGlobals() {
+        delete window.__VTP_SELECTED_ROUTE__;
+        delete window.__VTP_KIEMKE_RUNNING__;
+        delete window.__VTP_5STEPS_DONE__;
+        delete window.__VTP_5STEPS_ERROR__;
+        delete window.__VTP_CORE_SCAN_RUNNING__;
+        delete window.__VTP_SCAN_COMPLETE__;
+        delete window.__TEST_RELOAD_CALLED__;
+        delete window.VTPSettings;
+        delete window.VTPSmartDelay;
+        delete window.VTPNotification;
+        window.__TEST_STORAGE__ = {};
+        window.chrome = {
+            storage: {
+                local: {
+                    async set(obj) { Object.assign(window.__TEST_STORAGE__, obj); },
+                    async get(key) {
+                        if (Array.isArray(key)) {
+                            return key.reduce((acc, item) => {
+                                acc[item] = window.__TEST_STORAGE__[item];
+                                return acc;
+                            }, {});
+                        }
+                        if (typeof key === 'string') return { [key]: window.__TEST_STORAGE__[key] };
+                        return { ...window.__TEST_STORAGE__ };
+                    },
+                    async remove(key) { delete window.__TEST_STORAGE__[key]; }
+                }
+            }
+        };
+    }
+
+    async function loadSource(path) {
+        const res = await fetch(path + '?t=' + Date.now());
+        if (!res.ok) throw new Error(`Không tải được ${path}: HTTP ${res.status}`);
+        return res.text();
+    }
+
+    async function runScript(path, options = {}) {
+        let source = await loadSource(path);
+        if (options.patchReload) {
+            source = source.replace(/location\.reload\s*\(\s*\)\s*;/g, 'window.__TEST_RELOAD_CALLED__ = true;');
+        }
+        // Chạy script trong global scope để giống content script injection.
+        (0, eval)(source + `\n//# sourceURL=${path}`);
+    }
+
+    function buildRouteListDom({ routes = ['Tuyến A', 'Tuyến B'], selected = null } = {}) {
+        sandbox.innerHTML = `
+            <div class="z-combobox">
+                <input class="z-combobox-input" placeholder="Hình thức kiểm kê" value="Kiểm kê theo tuyến">
+                <button class="z-combobox-button">▼</button>
+            </div>
+            <div class="z-combobox-popup">
+                ${routes.map(r => `<div class="z-comboitem"><span class="z-comboitem-text">${escapeHtml(r)}</span></div>`).join('')}
+            </div>
+            <button class="z-button" id="searchBtn">Tìm kiếm</button>
+            <button class="z-button" id="kiemKeBtn">Kiểm kê</button>
+            <div class="z-messagebox-window hidden">
+                <button class="z-messagebox-button">OK</button>
+            </div>
+            <div id="routeAudit"></div>
+        `;
+
+        const popup = sandbox.querySelector('.z-combobox-popup');
+        sandbox.querySelector('.z-combobox-button').addEventListener('click', () => {
+            popup.style.display = popup.style.display === 'none' || !popup.style.display ? 'block' : 'none';
+        });
+        sandbox.querySelectorAll('.z-comboitem').forEach(item => {
+            item.addEventListener('click', () => {
+                sandbox.querySelector('.z-combobox-input').value = item.textContent.trim();
+                popup.style.display = 'none';
+                sandbox.querySelector('#routeAudit').dataset.selected = item.textContent.trim();
+            });
+        });
+        sandbox.querySelector('#searchBtn').addEventListener('click', () => {
+            sandbox.querySelector('#routeAudit').dataset.searched = 'true';
+        });
+        sandbox.querySelector('#kiemKeBtn').addEventListener('click', () => {
+            sandbox.querySelector('.z-messagebox-window').classList.remove('hidden');
+            sandbox.querySelector('.z-messagebox-window').style.display = 'block';
+        });
+        sandbox.querySelector('.z-messagebox-button').addEventListener('click', () => {
+            sandbox.querySelector('#routeAudit').dataset.accepted = 'true';
+        });
+        if (selected) window.__VTP_SELECTED_ROUTE__ = selected;
+    }
+
+    function buildScanDom({ codes = ['VTP123456789', 'SHOPEE987654321'], empty = false, pages = 1 } = {}) {
+        sandbox.innerHTML = `
+            <ul>
+                <li class="z-tab"><a class="z-tab-content"><span class="z-tab-text">Bưu phẩm đã kiểm kê</span></a></li>
+                <li class="z-tab"><a class="z-tab-content"><span class="z-tab-text" title="Bưu phẩm chưa kiểm kê">Bưu phẩm chưa kiểm kê</span></a></li>
+            </ul>
+            <div class="z-tabpanel" id="scanPanel">
+                <input class="clsinputpg" placeholder="Scan mã">
+                <div class="z-listbox">
+                    <div id="codeList">
+                        ${empty ? '<div class="z-listbox-emptybody-content">Không có bưu phẩm chưa kiểm kê</div>' : codes.map(c => `<div class="z-listcell-content">${escapeHtml(c)}</div>`).join('')}
+                    </div>
+                </div>
+                <button class="z-paging-next" ${pages > 1 ? '' : 'disabled'}>Next</button>
+                <button id="finishBtn"><span class="z-label">Hoàn thành</span></button>
+            </div>
+        `;
+
+        if (empty) {
+            sandbox.querySelector('input.clsinputpg')?.remove();
+        }
+
+        const input = sandbox.querySelector('input.clsinputpg');
+        const codeList = sandbox.querySelector('#codeList');
+        const nextBtn = sandbox.querySelector('.z-paging-next');
+        const finishBtn = sandbox.querySelector('#finishBtn');
+
+        let lastProcessedValue = '';
+        if (input) {
+            ['keydown', 'keypress', 'keyup'].forEach(eventName => {
+                input.addEventListener(eventName, event => {
+                    if (event.key !== 'Enter') return;
+                    const value = input.value.trim();
+                    if (!value || value === lastProcessedValue) return;
+                    lastProcessedValue = value;
+                    const cell = Array.from(codeList.querySelectorAll('.z-listcell-content'))
+                        .find(el => el.textContent.trim() === value);
+                    if (cell) cell.remove();
+                    setTimeout(() => {
+                        input.value = '';
+                        lastProcessedValue = '';
+                    }, 0);
+                    if (codeList.querySelectorAll('.z-listcell-content').length === 0) {
+                        codeList.innerHTML = '<div class="empty-state">Không có bưu phẩm chưa kiểm kê</div>';
+                    }
+                });
+            });
+        }
+        nextBtn.addEventListener('click', () => {
+            nextBtn.setAttribute('disabled', 'disabled');
+            codeList.innerHTML = '<div class="z-listcell-content">PKE555555555</div>';
+        });
+        finishBtn.addEventListener('click', () => {
+            finishBtn.dataset.clicked = 'true';
+        });
+    }
+
+    async function waitFor(predicate, timeout = 5000, label = 'điều kiện') {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            if (predicate()) return true;
+            await sleep(80);
+        }
+        throw new Error(`Timeout khi chờ ${label}`);
+    }
+
+    const tests = [
+        {
+            name: 'kiemke_tuyen_auto.js chọn đúng tuyến và hoàn tất 5 bước',
+            async run() {
+                resetGlobals();
+                buildRouteListDom({ selected: 'Tuyến B' });
+                await runScript(MODULES.notification);
+                await runScript(MODULES.route);
+                await waitFor(() => window.__VTP_5STEPS_DONE__ === true, 6000, '__VTP_5STEPS_DONE__');
+                const audit = sandbox.querySelector('#routeAudit').dataset;
+                assert(audit.selected === 'Tuyến B', 'Script không chọn đúng tuyến B');
+                assert(audit.searched === 'true', 'Script chưa click nút Tìm kiếm');
+                assert(audit.accepted === 'true', 'Script chưa click OK trong dialog');
+                return 'Đã chọn tuyến B, click Tìm kiếm, click Kiểm kê và xác nhận OK.';
+            }
+        },
+        {
+            name: 'kiemke_tuyen_auto.js báo lỗi khi không có route được chọn',
+            async run() {
+                resetGlobals();
+                buildRouteListDom();
+                await runScript(MODULES.notification);
+                await runScript(MODULES.route);
+                await sleep(300);
+                assert(window.__VTP_KIEMKE_RUNNING__ === false, 'Guard running không được reset khi thiếu route');
+                assert(window.__VTP_5STEPS_DONE__ !== true, 'Không nên báo done khi thiếu route');
+                return 'Thiếu window.__VTP_SELECTED_ROUTE__ → script dừng an toàn và reset guard.';
+            }
+        },
+        {
+            name: 'gapton_core_scan.js quét hết mã, click Hoàn thành và phát reload signal',
+            async run() {
+                resetGlobals();
+                buildScanDom({ codes: ['VTP123456789', 'SHOPEE987654321'], empty: false });
+                await runScript(MODULES.notification);
+                await runScript(MODULES.settings);
+                await runScript(MODULES.delay);
+                await runScript(MODULES.scan, { patchReload: true });
+                await waitFor(() => window.__TEST_RELOAD_CALLED__ === true, 40000, 'reload signal');
+                assert(window.__TEST_STORAGE__.__VTP_SCAN_COMPLETE__ === true, 'Chưa set __VTP_SCAN_COMPLETE__');
+                assert(sandbox.querySelector('#finishBtn').dataset.clicked === 'true', 'Chưa click Hoàn thành');
+                assert(sandbox.querySelectorAll('.z-listcell-content').length === 0, 'Chưa quét hết mã trên trang');
+                return 'Đã quét 2 mã, set storage signal, click Hoàn thành và gọi reload.';
+            }
+        },
+        {
+            name: 'gapton_core_scan.js xử lý tab chưa kiểm kê trống',
+            async run() {
+                resetGlobals();
+                buildScanDom({ empty: true });
+                await runScript(MODULES.notification);
+                await runScript(MODULES.settings);
+                await runScript(MODULES.delay);
+                await runScript(MODULES.scan, { patchReload: true });
+                await waitFor(() => window.__TEST_RELOAD_CALLED__ === true, 15000, 'reload signal tab trống');
+                assert(window.__TEST_STORAGE__.__VTP_SCAN_COMPLETE__ === true, 'Tab trống chưa set scan complete');
+                assert(sandbox.querySelector('#finishBtn').dataset.clicked === 'true', 'Tab trống chưa click Hoàn thành');
+                return 'Tab trống được nhận diện, script click Hoàn thành và phát tín hiệu hoàn tất.';
+            }
+        }
+    ];
+
+    async function runAll() {
+        resultsEl.innerHTML = '';
+        stats = { passed: 0, failed: 0, total: 0 };
+        updateStats();
+        for (const test of tests) {
+            try {
+                const details = await test.run();
+                addResult(test.name, true, details);
+            } catch (error) {
+                addResult(test.name, false, error.stack || error.message);
+            }
+        }
+    }
+
+    document.getElementById('runAllBtn').addEventListener('click', runAll);
+    document.getElementById('clearBtn').addEventListener('click', () => {
+        resultsEl.innerHTML = '';
+        sandbox.innerHTML = '';
+        stats = { passed: 0, failed: 0, total: 0 };
+        updateStats();
+    });
+})();
+</script>
+</body>
+</html>

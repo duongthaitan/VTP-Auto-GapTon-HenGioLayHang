@@ -16,4 +16,7 @@ desktop.ini
 *.log
 
 # Local dev tools — không cần publish
-tools/
+/tools/*
+!/tools/test_server/
+!/tools/test_server/server.js
+!/tools/test_server/kiemke_modules_test.html

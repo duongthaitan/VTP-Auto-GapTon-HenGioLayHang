@@ -417,6 +417,53 @@ Tool kiểm tra URL của tab hiện tại. Hãy đảm bảo domain là:
 
 ---
 
+## 🧪 Cập nhật mới nhất — Test kiểm kê tự động
+
+> [!IMPORTANT]
+> Bản cập nhật này bổ sung bộ test local để kiểm tra nhanh 2 module quan trọng nhất của luồng kiểm kê: `kiemke_tuyen_auto.js` và `gapton_core_scan.js`.
+
+### ✅ Thay đổi chính
+
+| Hạng mục | Nội dung |
+|:--|:--|
+| Test runner mới | Thêm trang `tools/test_server/kiemke_modules_test.html` để giả lập DOM ZK/ViettelPost |
+| Route chạy test | Thêm endpoint `http://localhost:3000/tests/kiemke-modules` vào `tools/test_server/server.js` |
+| Kiểm thử chọn tuyến | Xác nhận flow chọn tuyến → tìm kiếm → kiểm kê → xác nhận OK |
+| Kiểm thử scan mã | Xác nhận quét mã, click **Hoàn thành**, phát signal hoàn tất và reload |
+| Kiểm thử tab trống | Xác nhận xử lý đúng trường hợp tab “chưa kiểm kê” không còn mã |
+
+### 📊 Kết quả xác minh hiện tại
+
+```text
+Total: 4
+Passed: 4
+Failed: 0
+```
+
+Các test đã pass:
+
+1. `kiemke_tuyen_auto.js` chọn đúng tuyến và hoàn tất 5 bước.
+2. `kiemke_tuyen_auto.js` dừng an toàn khi thiếu `window.__VTP_SELECTED_ROUTE__`.
+3. `gapton_core_scan.js` quét hết mã, click **Hoàn thành**, set signal và gọi reload.
+4. `gapton_core_scan.js` xử lý đúng tab “chưa kiểm kê” trống.
+
+### ▶️ Cách chạy lại test
+
+```powershell
+node tools/test_server/server.js
+```
+
+Sau đó mở trình duyệt:
+
+```text
+http://localhost:3000/tests/kiemke-modules
+```
+
+> [!NOTE]
+> Nếu gặp lỗi `EADDRINUSE: address already in use :::3000`, nghĩa là test server đang chạy sẵn. Chỉ cần mở URL test ở trên, không cần chạy thêm server lần nữa.
+
+---
+
 ## 👨‍💻 Tác giả & Hỗ trợ
 
 <div align="center">
