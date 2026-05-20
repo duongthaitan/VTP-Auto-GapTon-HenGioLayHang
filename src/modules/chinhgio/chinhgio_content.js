@@ -1,12 +1,22 @@
 // ============================================================
 //  VTP Tool – Sửa Giờ Content Script
-//  v3.0 — Background-Tab Safe (Single-Bill Processing)
+//  v3.2 — Background-Tab Hardened + Speed Boost
 //  Nâng cấp:
 //    [1] Xử lý 1 ĐƠN DUY NHẤT rồi thoát — sidepanel.js điều phối
 //        vòng lặp → không bị Chrome throttle khi chuyển tab
 //    [2] Kết quả trả về qua chrome.storage (__VTP_CHINHGIO_STEP_DONE__)
 //    [3] Giữ nguyên Smart Skip & Auto-Recovery từ v2.0
 //    [4] closeOpenForms(), phát hiện 2 tầng, skip tracking
+//    [Fix #24] Thay sleep cố định + querySelector bằng waitForElement
+//        (MutationObserver KHÔNG bị Chrome throttle ở background tab),
+//        tăng timeout AJAX 3s→8s, dùng waitForElementGone cho form đóng
+//        → Khắc phục treo/skip hàng loạt khi tab VTP ở background.
+//    [Fix #25] Speed Boost
+//        • Bỏ sleep(delayMs) cố định 4s trước Tầng 2 — đã có
+//          waitForElement('button.select-down') tự phát hiện form ready
+//        • closeOpenForms: 800ms→250ms (Bootstrap fade ~150ms),
+//          Escape fallback: 600ms→200ms
+//        → Tiết kiệm ~4.5 giây/đơn, không ảnh hưởng độ tin cậy.
 // ============================================================
 
 if (window.__VTP_CHINHGIO_RUNNING__) {
@@ -56,6 +66,67 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
     };
 
     /**
+     * [Fix #24] Chờ phần tử BIẾN MẤT khỏi DOM (MutationObserver + timeout).
+     * Dùng để chờ form đóng — KHÔNG bị throttle ở background tab.
+     */
+    const waitForElementGone = (selector, timeout = 8000) => {
+        return new Promise((resolve) => {
+            if (!document.querySelector(selector)) return resolve(true);
+
+            let timeoutId = null;
+            const observer = new MutationObserver(() => {
+                if (!document.querySelector(selector)) {
+                    observer.disconnect();
+                    clearTimeout(timeoutId);
+                    resolve(true);
+                }
+            });
+
+            observer.observe(document.body, {
+                childList:     true,
+                subtree:       true,
+                attributes:    true,
+                attributeFilter: ['style', 'class']
+            });
+
+            timeoutId = setTimeout(() => {
+                observer.disconnect();
+                resolve(false);
+            }, timeout);
+        });
+    };
+
+    /**
+     * [Fix #24] Chờ phần tử thỏa predicate (vd: tìm theo text).
+     * Dùng MutationObserver → không bị throttle.
+     */
+    const waitForElementBy = (queryFn, timeout = 8000) => {
+        return new Promise((resolve) => {
+            const existing = queryFn();
+            if (existing) return resolve(existing);
+
+            let timeoutId = null;
+            const observer = new MutationObserver(() => {
+                const el = queryFn();
+                if (el) {
+                    observer.disconnect();
+                    clearTimeout(timeoutId);
+                    resolve(el);
+                }
+            });
+
+            observer.observe(document.body, {
+                childList: true, subtree: true, characterData: true
+            });
+
+            timeoutId = setTimeout(() => {
+                observer.disconnect();
+                resolve(null);
+            }, timeout);
+        });
+    };
+
+    /**
      * Mô phỏng thao tác gõ phím cho Angular/ZK input.
      */
     const setInputValue = (inputElement, value) => {
@@ -84,7 +155,8 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             if (btn) {
                 console.log(`[VTP Sửa Giờ] Đóng form bằng selector: ${sel}`);
                 btn.click();
-                await sleep(800); // chờ animation đóng hoàn tất
+                // [Fix #25] 800ms→250ms — Bootstrap modal fade animation chỉ ~150ms
+                await sleep(250);
                 return;
             }
         }
@@ -95,7 +167,8 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             keyCode: 27,
             bubbles: true
         }));
-        await sleep(600);
+        // [Fix #25] 600ms→200ms
+        await sleep(200);
     }
 
     // ─── Xử lý 1 đơn duy nhất ───────────────────────────────
@@ -140,7 +213,7 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             if (!searchInput) {
                 console.log('[VTP Sửa Giờ] Không ở trang tìm kiếm, thử đóng form...');
                 await closeOpenForms();
-                searchInput = await waitForElement('input#frm_keyword', 5000);
+                searchInput = await waitForElement('input#frm_keyword', 10000);
             }
 
             if (!searchInput) {
@@ -151,45 +224,51 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             // BƯỚC 2: Nhập mã và tìm kiếm
             // ═══════════════════════════════════════════
             setInputValue(searchInput, currentBill);
-            await sleep(500);
-
-            const searchBtn = document.querySelector('button.btn-viettel i.fa-search')?.parentElement;
+            // Chờ nút search hiện diện rồi click — không dùng sleep cố định
+            const searchBtn = await waitForElementBy(
+                () => document.querySelector('button.btn-viettel i.fa-search')?.parentElement,
+                3000
+            );
             if (searchBtn) searchBtn.click();
 
             // ═══════════════════════════════════════════
             // BƯỚC 3: Mở menu Sửa đơn
             // ═══════════════════════════════════════════
-            // Fallback selector: FA4, FA5 solid, FA6, hoặc bất kỳ class chứa fa-bars
+            // [Fix #24] Tăng timeout 8s→15s vì AJAX có thể chậm khi tab background
             const menuIcon = await waitForElement(
                 'i.fa.fa-bars, i.fas.fa-bars, i.fa-solid.fa-bars, [class*="fa-bars"]',
-                8000
+                15000
             );
             if (!menuIcon) {
                 throw new Error('Không load được bảng kết quả (mạng chậm hoặc mã không hợp lệ)');
             }
             menuIcon.click();
-            await sleep(800);
 
-            const editBtn = Array.from(document.querySelectorAll('button.vtp-bill-btn-action span'))
-                                 .find(span => span.innerText.includes('Sửa đơn'));
-            if (!editBtn) {
+            // [Fix #24] Chờ menu "Sửa đơn" xuất hiện qua MutationObserver
+            const editBtnSpan = await waitForElementBy(
+                () => Array.from(document.querySelectorAll('button.vtp-bill-btn-action span'))
+                          .find(span => span.innerText.includes('Sửa đơn')),
+                5000
+            );
+            if (!editBtnSpan) {
                 throw new Error('Không tìm thấy nút "Sửa đơn" trong menu');
             }
-            editBtn.parentElement.click();
+            editBtnSpan.parentElement.click();
 
             // ═══════════════════════════════════════════
             // BƯỚC 4: Phát hiện 2 tầng (v2.0)
             //
-            //   Tầng 1: Form sửa đơn có mở không? (3s)
-            //   Tầng 2: Khu vực chọn giờ có tồn tại? (3s)
+            //   Tầng 1: Form sửa đơn có mở không? (8s)
+            //   Tầng 2: Khu vực chọn giờ có tồn tại? (8s)
             //
             //   → Nếu thiếu tầng nào: skip sạch, không treo
             // ═══════════════════════════════════════════
 
             // ── Tầng 1: Chờ form sửa đơn mở (bất kỳ modal nào) ──
+            // [Fix #24] 3s→8s: ở background tab, animation modal có thể chậm
             const formOpened = await waitForElement(
                 '.modal-dialog, .modal-content, .modal.in, [class*="modal"][style*="display: block"]',
-                3000  // giảm từ 10s xuống 3s
+                8000
             );
 
             if (!formOpened) {
@@ -201,11 +280,15 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
             // ── Tầng 2: Chờ khu vực chọn giờ (button.select-down) ──
             if (!shouldSkip) {
-                await sleep(delayMs); // delay người dùng cài → form load đầy đủ
+                // [Fix #25] Bỏ sleep(delayMs) cố định trước đây (4s mặc định).
+                // waitForElement bên dưới dùng MutationObserver sẽ phát hiện
+                // button.select-down ngay khi form render xong → không cần
+                // chờ tĩnh. Vẫn giữ var delayMs cho backward-compat (không dùng).
 
+                // [Fix #24] 3s→8s
                 const timeSelectBtn = await waitForElement(
                     'button.select-down',
-                    3000  // giảm từ 10s xuống 3s
+                    8000
                 );
 
                 if (!timeSelectBtn) {
@@ -219,8 +302,13 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     // BƯỚC 5: Thao tác chọn giờ
                     // ═════════════════════════════════════
                     timeSelectBtn.click();
-                    await sleep(800);
 
+                    // [Fix #24] Chờ panel chọn ngày xuất hiện qua observer
+                    const dayLabel = await waitForElementBy(
+                        () => document.querySelector('label[for="2_apt"]') ||
+                              document.querySelector('label[for="1_apt"]'),
+                        4000
+                    );
                     // Ưu tiên ngày kia → ngày mai
                     const labelNgayKia = document.querySelector('label[for="2_apt"]');
                     const labelNgayMai = document.querySelector('label[for="1_apt"]');
@@ -229,20 +317,24 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     else {
                         console.warn('[VTP Sửa Giờ] Không tìm thấy label ngày, thử tiếp tục...');
                     }
-                    await sleep(500);
 
-                    // Chọn "Cả ngày" — chỉ match theo text, không hardcode ID attribute
-                    // (ID có thể thay đổi khi VTP nâng cấp UI)
-                    const labelCaNgay = Array.from(document.querySelectorAll('label.lb-time'))
-                                             .find(lbl => lbl.innerText.includes('Cả ngày'));
+                    // [Fix #24] Chờ "Cả ngày" render thay vì sleep cố định
+                    const labelCaNgay = await waitForElementBy(
+                        () => Array.from(document.querySelectorAll('label.lb-time'))
+                                   .find(lbl => lbl.innerText.includes('Cả ngày')),
+                        4000
+                    );
                     if (labelCaNgay) labelCaNgay.click();
-                    await sleep(500);
 
                     // ═════════════════════════════════════
                     // BƯỚC 6: Cập nhật và đợi form đóng
                     // ═════════════════════════════════════
-                    const updateBtn = Array.from(document.querySelectorAll('button.btn-viettel.btn-block'))
-                                           .find(btn => btn.innerText.trim() === 'Cập nhật');
+                    // [Fix #24] Chờ nút Cập nhật render
+                    const updateBtn = await waitForElementBy(
+                        () => Array.from(document.querySelectorAll('button.btn-viettel.btn-block'))
+                                   .find(btn => btn.innerText.trim() === 'Cập nhật'),
+                        4000
+                    );
                     if (updateBtn) {
                         updateBtn.click();
                     } else {
@@ -253,19 +345,11 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     }
 
                     if (!shouldSkip) {
-                        // Chờ form đóng (button.select-down biến mất)
-                        let formClosed = false;
-                        let waited     = 0;
-                        while (waited < 6000) {
-                            await sleep(300);
-                            waited += 300;
-                            if (!document.querySelector('button.select-down')) {
-                                formClosed = true;
-                                break;
-                            }
-                        }
+                        // [Fix #24] Chờ form đóng qua MutationObserver, không dùng polling sleep
+                        // Tăng 6s→15s — server VTP đôi khi chậm response
+                        const formClosed = await waitForElementGone('button.select-down', 15000);
                         if (!formClosed) {
-                            console.warn('[VTP Sửa Giờ] Form chưa đóng sau 6s, buộc đóng...');
+                            console.warn('[VTP Sửa Giờ] Form chưa đóng sau 15s, buộc đóng...');
                             await closeOpenForms();
                         }
                     }

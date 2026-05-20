@@ -1,31 +1,19 @@
 {
   "manifest_version": 3,
   "name": "VTP Tool All-in-One",
-  "version": "3.1",
-  "description": "Tích hợp Auto Sửa Giờ, Auto Quét Kiểm Tồn và Ghi Đơn Hàng ViettelPost",
+  "version": "3.2",
+  "description": "Tích hợp Auto Sửa Giờ và Auto Quét Kiểm Tồn ViettelPost",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
     "sidePanel",
-    "tabs",
-    "notifications"
+    "tabs"
   ],
   "host_permissions": [
     "*://*.viettelpost.vn/*",
     "*://*.viettelpost.com.vn/*",
-    "https://evtp2.viettelpost.vn/*",
-    "https://script.google.com/*",
-    "https://script.googleusercontent.com/*",
     "http://localhost/*"
-  ],
-  "content_scripts": [
-    {
-      "matches": ["https://evtp2.viettelpost.vn/*"],
-      "js": ["src/modules/ghidon/ghidon_content.js"],
-      "css": ["src/modules/ghidon/ghidon_content.css"],
-      "run_at": "document_idle"
-    }
   ],
   "icons": {
     "16":  "assets/icons/icon16.png",

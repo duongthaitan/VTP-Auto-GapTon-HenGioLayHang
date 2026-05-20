@@ -1,14 +1,18 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v2.5 Critical Fix:
-//    - Fix #23: chrome.storage.local.set() KHÔNG hoạt động từ world:'MAIN'
-//              (Chrome MV3 không cấp Extension API cho MAIN world scripts)
-//              → Thay bằng waitForTabReload: gapton_core_scan LUÔN gọi
-//              location.reload() khi xong → tab reload = tín hiệu scan done
-//    - Fix #22: pollScanComplete đăng ký TRƯỚC inject (giữ lại backup)
-//    - Fix #21: chrome.storage.local thay vì window variable
-//    - Fix #17: Bỏ double F5
-//    - Fix #20: reloadAfterScanPromise đăng ký TRƯỚC inject
+//  v3.2 — Excel-driven Customer Picker
+//    - Fix #28: Storage cleanup — xóa billList mồ côi khi không
+//        còn isRunning (legacy từ textarea cũ)
+//    - Fix #27: Re-wire delayInput — dùng làm khoảng cách giữa
+//        các đơn (delay sleep), KHÔNG còn sleep tĩnh trước Tầng 2
+//    - Tính năng: chọn file .xlsx → group theo TEN_KHGUI →
+//        click checkbox khách → ẩn các khách khác
+//    - Fix #25: Speed boost — giảm sleep tĩnh trong content/
+//        sidepanel ~5s/đơn
+//    - Fix #24: Sửa Giờ treo khi chuyển tab khác
+//        • Tăng timeout/đơn 120s → 300s, retry busy/timeout
+//    - Fix #23: chrome.storage.local.set() KHÔNG hoạt động từ
+//        world:'MAIN' → waitForTabReload thay storage signal
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
 
@@ -57,32 +61,344 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // ════════════════════════════════════════
-    //  TEXTAREA — Live bill count (debounced)
+    //  FILE PICKER + CUSTOMER COMBO (Sửa Giờ)
+    //  Thay textarea cũ — load .xlsx, group theo TEN_KHGUI,
+    //  pick MA_PHIEUGUI làm bill list.
     // ════════════════════════════════════════
-    const billListEl  = document.getElementById('billList');
-    const billCountEl = document.getElementById('billCount');
+    const excelFileInput      = document.getElementById('excelFileInput');
+    const excelFilePickBtn    = document.getElementById('excelFilePickBtn');
+    const excelFilePickLabel  = document.getElementById('excelFilePickLabel');
+    const filePickerSubtitle  = document.getElementById('filePickerSubtitle');
+    const fileTotalCount      = document.getElementById('fileTotalCount');
+    const fileInfo            = document.getElementById('fileInfo');
+    const fileInfoName        = document.getElementById('fileInfoName');
+    const fileInfoClear       = document.getElementById('fileInfoClear');
+
+    const customerCard         = document.getElementById('customerCard');
+    const customerSearch       = document.getElementById('customerSearch');
+    const customerClear        = document.getElementById('customerClear');
+    const customerList         = document.getElementById('customerList');
+    const customerListHeader   = document.getElementById('customerListHeader');
+    const customerResetBtn     = document.getElementById('customerResetBtn');
+    const customerOrderCount   = document.getElementById('customerOrderCount');
+    const customerSubtitle     = document.getElementById('customerSubtitle');
+
+    // State trong session — không persist qua đóng Chrome
+    let _customerMap      = new Map(); // Map<TEN_KHGUI, MA_PHIEUGUI[]>
+    let _selectedCustomer = null;
+    let _activeIdx        = -1;
 
     function parseBills() {
-        return billListEl.value.split('\n').map(b => b.trim()).filter(b => b !== '');
+        if (!_selectedCustomer) return [];
+        return _customerMap.get(_selectedCustomer) || [];
     }
 
-    function updateBillCount() {
-        const bills = parseBills();
-        if (bills.length > 0) {
-            billCountEl.textContent = `${bills.length} mã`;
-            billCountEl.classList.add('has-bills');
+    function setFileInfo(fileName, totalOrders) {
+        if (fileName) {
+            fileInfo.style.display = 'flex';
+            fileInfoName.textContent = fileName;
+            fileInfoName.title = fileName;
+            excelFilePickLabel.textContent = 'Chọn file khác';
+            filePickerSubtitle.textContent = `Đã load ${_customerMap.size} khách hàng`;
+            fileTotalCount.textContent = `${totalOrders.toLocaleString('vi-VN')} đơn`;
+            fileTotalCount.style.display = 'inline-flex';
+            fileTotalCount.classList.add('has-bills');
         } else {
-            billCountEl.textContent = '0 mã';
-            billCountEl.classList.remove('has-bills');
+            fileInfo.style.display = 'none';
+            fileInfoName.textContent = '—';
+            excelFilePickLabel.textContent = 'Chọn file Excel';
+            filePickerSubtitle.textContent = 'Chọn file để load danh sách khách';
+            fileTotalCount.style.display = 'none';
         }
     }
 
-    // Debounce 120ms — tránh re-render khi user paste lớn hoặc gõ nhanh
-    let _billCountTimer = null;
-    billListEl.addEventListener('input', () => {
-        clearTimeout(_billCountTimer);
-        _billCountTimer = setTimeout(updateBillCount, 120);
+    /**
+     * Trả về danh sách khách hiển thị trên UI.
+     * Khi đã chọn 1 khách → CHỈ trả về khách đó (ẩn các khách khác).
+     * Khi chưa chọn → áp dụng search query, sort theo số đơn giảm dần.
+     */
+    function getDisplayedEntries() {
+        if (_selectedCustomer && _customerMap.has(_selectedCustomer)) {
+            return [[_selectedCustomer, _customerMap.get(_selectedCustomer)]];
+        }
+        const q = customerSearch.value.trim().toLowerCase();
+        let entries = Array.from(_customerMap.entries());
+        if (q) {
+            entries = entries.filter(([name]) => name.toLowerCase().includes(q));
+        }
+        // Sort mặc định: nhiều đơn trước
+        entries.sort((a, b) => b[1].length - a[1].length);
+        return entries;
+    }
+
+    function highlightMatch(name, query) {
+        if (!query) return null;
+        const lower = name.toLowerCase();
+        const q = query.toLowerCase();
+        const idx = lower.indexOf(q);
+        if (idx < 0) return null;
+        const frag = document.createDocumentFragment();
+        if (idx > 0) frag.appendChild(document.createTextNode(name.slice(0, idx)));
+        const mark = document.createElement('mark');
+        mark.textContent = name.slice(idx, idx + query.length);
+        frag.appendChild(mark);
+        if (idx + query.length < name.length) {
+            frag.appendChild(document.createTextNode(name.slice(idx + query.length)));
+        }
+        return frag;
+    }
+
+    function renderCustomerList() {
+        const entries = getDisplayedEntries();
+        const total = _customerMap.size;
+
+        // Update header text
+        if (_selectedCustomer) {
+            customerListHeader.textContent = `Đang chọn (${total - 1} khách khác đã ẩn)`;
+            customerResetBtn.style.display = 'flex';
+        } else {
+            const q = customerSearch.value.trim();
+            if (q) {
+                customerListHeader.textContent = `${entries.length} / ${total} khách`;
+            } else {
+                customerListHeader.textContent = `${total} khách`;
+            }
+            customerResetBtn.style.display = 'none';
+        }
+
+        if (entries.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'cust-empty';
+            empty.textContent = 'Không tìm thấy khách phù hợp';
+            customerList.innerHTML = '';
+            customerList.appendChild(empty);
+            _activeIdx = -1;
+            return;
+        }
+
+        const q = _selectedCustomer ? '' : customerSearch.value.trim();
+        const frag = document.createDocumentFragment();
+        entries.forEach(([name, bills], idx) => {
+            const item = document.createElement('div');
+            item.className = 'cust-item';
+            item.dataset.name = name;
+            item.dataset.idx = idx;
+            if (name === _selectedCustomer) item.classList.add('is-selected');
+            if (idx === _activeIdx) item.classList.add('is-active');
+
+            const cb = document.createElement('span');
+            cb.className = 'cust-cb';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'cust-item-name';
+            nameEl.title = name;
+            const highlighted = highlightMatch(name, q);
+            if (highlighted) nameEl.appendChild(highlighted);
+            else nameEl.textContent = name;
+
+            const countEl = document.createElement('span');
+            countEl.className = 'cust-item-count';
+            countEl.textContent = `${bills.length} đơn`;
+
+            item.appendChild(cb);
+            item.appendChild(nameEl);
+            item.appendChild(countEl);
+            item.addEventListener('click', () => {
+                if (_selectedCustomer === name) {
+                    // Click lại khách đang chọn → bỏ chọn
+                    clearCustomerSelection();
+                } else {
+                    selectCustomer(name);
+                }
+            });
+            frag.appendChild(item);
+        });
+        customerList.innerHTML = '';
+        customerList.appendChild(frag);
+    }
+
+    function selectCustomer(name) {
+        if (!_customerMap.has(name)) return;
+        _selectedCustomer = name;
+        const bills = _customerMap.get(name);
+        customerOrderCount.textContent = `${bills.length} đơn`;
+        customerOrderCount.style.display = 'inline-flex';
+        customerOrderCount.classList.add('has-bills');
+        customerSubtitle.textContent = 'Sẵn sàng chạy';
+        // Khi đã chọn → xóa search query để header hiển thị rõ
+        customerSearch.value = '';
+        customerClear.style.display = 'none';
+        renderCustomerList();
+        try {
+            chrome.storage.session?.set({ vtpSelectedCustomer: name });
+        } catch (_) {}
+    }
+
+    function clearCustomerSelection() {
+        _selectedCustomer = null;
+        customerOrderCount.style.display = 'none';
+        customerSubtitle.textContent = 'Chọn khách để chạy đơn';
+        try { chrome.storage.session?.remove('vtpSelectedCustomer'); } catch (_) {}
+        renderCustomerList();
+    }
+
+    function clearFile() {
+        _customerMap = new Map();
+        _selectedCustomer = null;
+        excelFileInput.value = '';
+        setFileInfo(null, 0);
+        customerCard.style.display = 'none';
+        clearCustomerSelection();
+        try {
+            chrome.storage.session?.remove([
+                'vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer'
+            ]);
+        } catch (_) {}
+    }
+
+    async function handleFileChosen(file) {
+        if (!file) return;
+        try {
+            excelFilePickBtn.disabled = true;
+            excelFilePickBtn.classList.add('is-loading');
+            excelFilePickLabel.textContent = 'Đang đọc file...';
+            // [Fix #32] Yield UI 1 frame để spinner kịp render trước khi
+            // parse chiếm main thread (file vài MB block ~1-2s)
+            await new Promise(r => requestAnimationFrame(() => r()));
+
+            const result = await window.VTPXlsx.parseFile(file, { headerRow: 1 });
+
+            if (!result.headers.includes('TEN_KHGUI') || !result.headers.includes('MA_PHIEUGUI')) {
+                throw new Error('File thiếu cột TEN_KHGUI hoặc MA_PHIEUGUI');
+            }
+
+            _customerMap = window.VTPXlsx.groupBy(result.byHeader, 'TEN_KHGUI', 'MA_PHIEUGUI');
+
+            if (_customerMap.size === 0) {
+                throw new Error('Không tìm thấy đơn hàng nào trong file');
+            }
+
+            const totalOrders = result.byHeader.length;
+            setFileInfo(file.name, totalOrders);
+            customerCard.style.display = 'block';
+            clearCustomerSelection();
+            renderCustomerList();
+
+            try {
+                const serialized = Array.from(_customerMap.entries());
+                chrome.storage.session?.set({
+                    vtpFileName:    file.name,
+                    vtpCustomerMap: serialized
+                });
+            } catch (_) {}
+
+        } catch (err) {
+            console.error('[VTP Sửa Giờ] Lỗi đọc file:', err);
+            alert('Không đọc được file Excel: ' + err.message);
+            clearFile();
+        } finally {
+            excelFilePickBtn.disabled = false;
+            excelFilePickBtn.classList.remove('is-loading');
+        }
+    }
+
+    // ── Wire events ──
+    excelFilePickBtn.addEventListener('click', () => excelFileInput.click());
+    excelFileInput.addEventListener('change', (e) => {
+        const f = e.target.files?.[0];
+        if (f) handleFileChosen(f);
     });
+    fileInfoClear.addEventListener('click', clearFile);
+
+    // Drag & drop trên nút chọn file
+    excelFilePickBtn.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        excelFilePickBtn.classList.add('is-dragover');
+    });
+    excelFilePickBtn.addEventListener('dragleave', () => {
+        excelFilePickBtn.classList.remove('is-dragover');
+    });
+    excelFilePickBtn.addEventListener('drop', (e) => {
+        e.preventDefault();
+        excelFilePickBtn.classList.remove('is-dragover');
+        const f = e.dataTransfer?.files?.[0];
+        if (f) handleFileChosen(f);
+    });
+
+    // Search (debounced)
+    let _searchTimer = null;
+    customerSearch.addEventListener('input', () => {
+        customerClear.style.display = customerSearch.value ? 'flex' : 'none';
+        // Nếu user gõ trong khi đang chọn 1 khách → coi như muốn chọn lại
+        if (_selectedCustomer) {
+            _selectedCustomer = null;
+            customerOrderCount.style.display = 'none';
+            customerSubtitle.textContent = 'Chọn khách để chạy đơn';
+            try { chrome.storage.session?.remove('vtpSelectedCustomer'); } catch (_) {}
+        }
+        _activeIdx = -1;
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(renderCustomerList, 80);
+    });
+    customerSearch.addEventListener('keydown', (e) => {
+        const items = customerList.querySelectorAll('.cust-item');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            _activeIdx = Math.min(_activeIdx + 1, items.length - 1);
+            updateActive(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            _activeIdx = Math.max(_activeIdx - 1, 0);
+            updateActive(items);
+        } else if (e.key === 'Enter' && _activeIdx >= 0) {
+            e.preventDefault();
+            const name = items[_activeIdx]?.dataset.name;
+            if (name) selectCustomer(name);
+        } else if (e.key === 'Escape') {
+            customerSearch.value = '';
+            customerClear.style.display = 'none';
+            _activeIdx = -1;
+            renderCustomerList();
+            customerSearch.blur();
+        }
+    });
+
+    function updateActive(items) {
+        items.forEach((it, i) => it.classList.toggle('is-active', i === _activeIdx));
+        if (_activeIdx >= 0 && items[_activeIdx]) {
+            items[_activeIdx].scrollIntoView({ block: 'nearest' });
+        }
+    }
+
+    customerClear.addEventListener('click', () => {
+        customerSearch.value = '';
+        customerClear.style.display = 'none';
+        _activeIdx = -1;
+        renderCustomerList();
+        customerSearch.focus();
+    });
+
+    customerResetBtn.addEventListener('click', clearCustomerSelection);
+
+    // Restore session
+    try {
+        chrome.storage.session?.get(
+            ['vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer'],
+            (data) => {
+                if (data?.vtpCustomerMap && data.vtpCustomerMap.length > 0) {
+                    _customerMap = new Map(data.vtpCustomerMap);
+                    let total = 0;
+                    _customerMap.forEach(v => total += v.length);
+                    setFileInfo(data.vtpFileName || 'file đã chọn', total);
+                    customerCard.style.display = 'block';
+                    renderCustomerList();
+                    if (data.vtpSelectedCustomer && _customerMap.has(data.vtpSelectedCustomer)) {
+                        selectCustomer(data.vtpSelectedCustomer);
+                    }
+                }
+            }
+        );
+    } catch (_) {}
 
     // ════════════════════════════════════════
     //  DELAY STEPPER (+/−)
@@ -102,8 +418,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const progressCard = document.getElementById('progressContainer');
     const progressBar  = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
+    const progressCurrent     = document.getElementById('progressCurrent');
+    const progressCurrentCode = document.getElementById('progressCurrentCode');
     const statusDot    = document.querySelector('#statusChinhGio .status-dot');
     const statusMsg    = document.querySelector('#statusChinhGio .status-text');
+
+    // [Fix #26] Hiển thị mã đơn đang chạy
+    function setCurrentBill(bill) {
+        if (!progressCurrent || !progressCurrentCode) return;
+        if (bill) {
+            progressCurrent.style.display = 'flex';
+            progressCurrentCode.textContent = bill;
+            progressCurrentCode.title = bill;
+        } else {
+            progressCurrent.style.display = 'none';
+            progressCurrentCode.textContent = '—';
+        }
+    }
 
     function updateProgressUI(current, total) {
         if (total > 0) {
@@ -132,11 +463,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (data.delay) {
             delayInput.value = data.delay;
         }
-        // Restore bill list và tiến trình nếu đang chạy
         if (data.isRunning && data.billList) {
-            billListEl.value = data.billList.join('\n');
-            updateBillCount();
+            // Đang chạy: khôi phục progress + mã đơn hiện tại
             updateProgressUI(data.currentIndex || 0, data.billList.length);
+            // [Fix #26] Khôi phục mã đơn đang chạy nếu có
+            const idx = data.currentIndex || 0;
+            if (idx < data.billList.length) {
+                setCurrentBill(data.billList[idx]);
+            }
+        } else if (data.billList || data.currentIndex !== undefined) {
+            // [Fix #28] Không chạy mà còn billList/currentIndex cũ →
+            // dọn để không gây hiểu lầm khi mở sidepanel sau này.
+            chrome.storage.local.remove(['billList', 'currentIndex']);
         }
     });
 
@@ -161,6 +499,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (changes.isRunning && changes.isRunning.newValue === false) {
             if (statusMsg) statusMsg.textContent      = 'Đã dừng.';
             if (statusDot) statusDot.style.background = '#6b7280';
+            setCurrentBill(null); // [Fix #26]
             // Re-enable nút Start khi script báo đã dừng
             const startBtn = document.getElementById('startChinhGioBtn');
             if (startBtn) startBtn.disabled = false;
@@ -216,7 +555,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const delay = parseInt(delayInput.value) || 4;
 
         if (bills.length === 0) {
-            alert('Vui lòng dán ít nhất 1 mã vận đơn!');
+            if (!_selectedCustomer) {
+                alert('Vui lòng chọn file Excel và chọn khách hàng trước khi chạy!');
+            } else {
+                alert('Khách hàng đã chọn không có đơn nào.');
+            }
             return;
         }
 
@@ -243,6 +586,53 @@ document.addEventListener('DOMContentLoaded', async () => {
         // ── Vòng lặp chính — chạy ở sidepanel (KHÔNG bị throttle) ──
         const skipList = [];
 
+        // [Fix #24] Helper: inject + chờ kết quả 1 đơn, có retry khi 'busy'/'timeout'
+        async function runOneBillWithRetry(bill, maxAttempts = 2) {
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                // Xóa signal cũ
+                try { await chrome.storage.local.remove('__VTP_CHINHGIO_STEP_DONE__'); } catch (_) {}
+
+                // Inject content script xử lý 1 đơn
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: mainTabId },
+                        files: ['src/shared/notification.js', 'src/modules/chinhgio/chinhgio_content.js'],
+                        injectImmediately: true  // [Fix #24] tránh delay khi tab background
+                    });
+                } catch (e) {
+                    return { status: 'error', reason: 'Inject thất bại: ' + e.message };
+                }
+
+                // [Fix #24] Tăng timeout 120s → 300s vì tab background có thể chậm
+                const result = await waitForChinhGioStepDone(300000);
+
+                // 'busy' = script cũ chưa thoát (do timeout trước đó)
+                // → chờ 2s rồi retry
+                if (result.status === 'busy' && attempt < maxAttempts) {
+                    console.warn(`[VTP Sửa Giờ] Script còn busy, chờ 2s rồi retry (lần ${attempt + 1}/${maxAttempts})`);
+                    await new Promise(r => setTimeout(r, 2000));
+                    continue;
+                }
+
+                // 'timeout' = đợi quá 300s mà không có signal
+                // → retry 1 lần (có thể tab vừa chuyển active xong)
+                if (result.status === 'timeout' && attempt < maxAttempts) {
+                    console.warn(`[VTP Sửa Giờ] Timeout 300s đơn "${bill}", retry lần ${attempt + 1}/${maxAttempts}`);
+                    // Reset cờ guard ở page để inject mới chạy được
+                    try {
+                        await chrome.scripting.executeScript({
+                            target: { tabId: mainTabId },
+                            func: () => { window.__VTP_CHINHGIO_RUNNING__ = false; }
+                        });
+                    } catch (_) {}
+                    continue;
+                }
+
+                return result;
+            }
+            return { status: 'timeout', reason: 'Hết số lần thử' };
+        }
+
         for (let i = 0; i < bills.length; i++) {
             // Kiểm tra user bấm Dừng
             const state = await chrome.storage.local.get(['isRunning']);
@@ -255,41 +645,42 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (statusMsg) statusMsg.textContent      = `Đang xử lý đơn ${i + 1} / ${bills.length}…`;
             if (statusDot) statusDot.style.background = '#f59e0b';
             updateProgressUI(i, bills.length);
+            setCurrentBill(bills[i]); // [Fix #26]
 
-            // Xóa signal cũ
-            try { await chrome.storage.local.remove('__VTP_CHINHGIO_STEP_DONE__'); } catch (_) {}
-
-            // Inject content script xử lý 1 đơn
-            try {
-                await chrome.scripting.executeScript({
-                    target: { tabId: mainTabId },
-                    files: ['src/shared/notification.js', 'src/modules/chinhgio/chinhgio_content.js']
-                });
-            } catch (e) {
-                console.error('[VTP] Lỗi inject:', e);
-                skipList.push({ bill: bills[i], reason: 'Inject thất bại: ' + e.message });
-                continue;
-            }
-
-            // Chờ content script hoàn thành 1 đơn (max 2 phút)
-            const result = await waitForChinhGioStepDone(120000);
+            // [Fix #24] Inject + chờ kết quả với retry khi busy/timeout
+            const result = await runOneBillWithRetry(bills[i], 2);
             console.log(`[VTP Sửa Giờ] Kết quả đơn ${i + 1}:`, result.status, result.bill || '');
 
-            if (result.status === 'skipped' || result.status === 'error') {
-                skipList.push({ bill: result.bill || bills[i], reason: result.reason || 'Lỗi không xác định' });
+            if (result.status === 'skipped' || result.status === 'error' || result.status === 'timeout') {
+                skipList.push({
+                    bill:   result.bill || bills[i],
+                    reason: result.reason || (result.status === 'timeout' ? 'Quá thời gian xử lý' : 'Lỗi không xác định')
+                });
+                // Khi timeout: index ở storage chưa được tăng (script chưa chạy xong)
+                // → tự tăng để vòng lặp không kẹt ở cùng 1 đơn
+                if (result.status === 'timeout') {
+                    const cur = await chrome.storage.local.get(['currentIndex']);
+                    if ((cur.currentIndex || 0) <= i) {
+                        await chrome.storage.local.set({ currentIndex: i + 1 });
+                    }
+                }
             }
 
             // Cập nhật progress
             updateProgressUI(i + 1, bills.length);
 
-            // Delay giữa các đơn — chạy ở sidepanel → KHÔNG bị throttle!
+            // [Fix #27] Delay giữa các đơn — dùng giá trị user cài (giây).
+            // Mặc định 4s; min 0.3s để page kịp render. Trước đây delayMs
+            // được dùng làm sleep tĩnh trước Tầng 2 — đã bỏ ở Fix #25.
             if (i < bills.length - 1) {
-                await new Promise(r => setTimeout(r, 1000));
+                const gapMs = Math.max(300, ((parseInt(delayInput.value, 10) || 4) * 1000));
+                await new Promise(r => setTimeout(r, gapMs));
             }
         }
 
         // ── Hoàn tất ──
         await chrome.storage.local.set({ isRunning: false });
+        setCurrentBill(null); // [Fix #26]
 
         if (skipList.length === 0) {
             if (statusMsg) statusMsg.textContent      = '✅ Đã hoàn thành!';
@@ -309,6 +700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await chrome.storage.local.set({ isRunning: false });
         if (statusMsg) statusMsg.textContent      = 'Đã dừng.';
         if (statusDot) statusDot.style.background = '#6b7280';
+        setCurrentBill(null); // [Fix #26]
         startChinhGioBtn.disabled  = false;
         startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
     });
@@ -1024,338 +1416,5 @@ document.addEventListener('DOMContentLoaded', async () => {
             startGapTonBtn.innerHTML = BTN_HTML.gaptonPlay;
         }, 3000);
     });
-
-    // ════════════════════════════════════════
-    //  TAB 3 — GHI ĐƠN HÀNG
-    // ════════════════════════════════════════
-    const ghidonToggle         = document.getElementById('ghidonToggle');
-    const ghidonConnDot        = document.getElementById('ghidonConnDot');
-    const ghidonConnMsg        = document.getElementById('ghidonConnMsg');
-    const ghidonConnectionText = document.getElementById('ghidonConnectionText');
-    const ghidonTotalOrders    = document.getElementById('ghidonTotalOrders');
-    const ghidonTotalCOD       = document.getElementById('ghidonTotalCOD');
-    const ghidonOrderList      = document.getElementById('ghidonOrderList');
-    const ghidonPendingSection = document.getElementById('ghidonPendingSection');
-    const ghidonPendingCount   = document.getElementById('ghidonPendingCount');
-    const ghidonSyncBtn        = document.getElementById('ghidonSyncBtn');
-    const ghidonResetBtn       = document.getElementById('ghidonResetBtn');
-    const ghidonBadge          = document.getElementById('ghidonBadge');
-    // Settings
-    const ghidonSettingsToggle = document.getElementById('ghidonSettingsToggle');
-    const ghidonSettingsBody   = document.getElementById('ghidonSettingsBody');
-    const ghidonWebAppUrl      = document.getElementById('ghidonWebAppUrl');
-    const ghidonSheetId        = document.getElementById('ghidonSheetId');
-    const ghidonSheetName      = document.getElementById('ghidonSheetName');
-    const ghidonBuuTa          = document.getElementById('ghidonBuuTa');
-    const ghidonScanInterval   = document.getElementById('ghidonScanInterval');
-    const ghidonMinLen         = document.getElementById('ghidonMinLen');
-    const ghidonSoundEnabled   = document.getElementById('ghidonSoundEnabled');
-    const ghidonDuplicateCheck = document.getElementById('ghidonDuplicateCheck');
-    const ghidonSaveSettingsBtn= document.getElementById('ghidonSaveSettingsBtn');
-    const ghidonTestConnBtn    = document.getElementById('ghidonTestConnBtn');
-    const ghidonTestResult     = document.getElementById('ghidonTestResult');
-    const ghidonOpenSheetBtn   = document.getElementById('ghidonOpenSheetBtn');
-    // Account
-    const ghidonAccountBar     = document.getElementById('ghidonAccountBar');
-    const ghidonAccountIcon    = document.getElementById('ghidonAccountIcon');
-    const ghidonAccountName    = document.getElementById('ghidonAccountName');
-    const ghidonWrongAccount   = document.getElementById('ghidonWrongAccount');
-    const ghidonWrongAccountMsg= document.getElementById('ghidonWrongAccountMsg');
-
-    // ── Helper: gửi message đến background ──
-    function ghidonMsg(msg) {
-        return new Promise((resolve) => {
-            chrome.runtime.sendMessage(msg, (resp) => {
-                if (chrome.runtime.lastError) resolve({});
-                else resolve(resp || {});
-            });
-        });
-    }
-
-    // ── Helper: format tiền ──
-    function ghidonFormatMoney(amount) {
-        const num = parseInt(amount, 10) || 0;
-        if (num === 0) return '0đ';
-        return num.toLocaleString('vi-VN') + 'đ';
-    }
-
-    // ── Helper: lấy giờ từ chuỗi ──
-    function ghidonExtractTime(timeStr) {
-        if (!timeStr) return '';
-        const parts = timeStr.split(', ');
-        return parts[1] ? parts[1].substring(0, 5) : timeStr.substring(0, 5);
-    }
-
-    // ── Khởi tạo GhiĐơn tab ──
-    async function ghidonInit() {
-        await ghidonLoadSettings();
-        await ghidonLoadStats();
-        await ghidonCheckConnection();
-        await ghidonLoadAccountStatus(); // Khôi phục trạng thái account
-    }
-
-    // ── Load settings vào form ──
-    async function ghidonLoadSettings() {
-        const s = await ghidonMsg({ action: 'GHIDON_GET_SETTINGS' });
-        ghidonToggle.checked = s.ghidon_enabled !== false;
-        // Chỉ ghi đè nếu storage có giá trị — giữ nguyên HTML default nếu chưa lưu
-        if (ghidonWebAppUrl    && s.ghidon_sheetWebAppUrl) ghidonWebAppUrl.value    = s.ghidon_sheetWebAppUrl;
-        if (ghidonSheetId      && s.ghidon_sheetId)        ghidonSheetId.value      = s.ghidon_sheetId;
-        if (ghidonSheetName    && s.ghidon_sheetName)      ghidonSheetName.value    = s.ghidon_sheetName;
-        if (ghidonBuuTa        && s.ghidon_buuTaName)      ghidonBuuTa.value        = s.ghidon_buuTaName;
-        if (ghidonScanInterval && s.ghidon_scanInterval)   ghidonScanInterval.value = s.ghidon_scanInterval;
-        if (ghidonMinLen       && s.ghidon_minBarcodeLen)  ghidonMinLen.value       = s.ghidon_minBarcodeLen;
-        if (ghidonSoundEnabled)   ghidonSoundEnabled.checked   = s.ghidon_soundEnabled !== false;
-        if (ghidonDuplicateCheck) ghidonDuplicateCheck.checked = s.ghidon_duplicateCheck !== false;
-    }
-
-    // ── Load stats + render orders + pending ──
-    async function ghidonLoadStats() {
-        const s = await ghidonMsg({ action: 'GHIDON_GET_SETTINGS' });
-        const stats = s.ghidon_todayStats || {};
-        const today = new Date().toISOString().split('T')[0];
-
-        if (stats.date === today) {
-            ghidonTotalOrders.textContent = stats.count || 0;
-            ghidonTotalCOD.textContent    = ghidonFormatMoney(stats.totalCOD || 0);
-            ghidonRenderOrders(stats.orders || []);
-            // Badge on tab
-            const count = stats.count || 0;
-            if (ghidonBadge) {
-                ghidonBadge.textContent   = count > 0 ? count : 0;
-                ghidonBadge.style.display = count > 0 ? 'inline-flex' : 'none';
-            }
-        } else {
-            ghidonTotalOrders.textContent = '0';
-            ghidonTotalCOD.textContent    = '0đ';
-            ghidonRenderOrders([]);
-            if (ghidonBadge) ghidonBadge.style.display = 'none';
-        }
-
-        // Pending
-        const pending = s.ghidon_pendingOrders || [];
-        if (pending.length > 0) {
-            ghidonPendingSection.style.display = 'block';
-            ghidonPendingCount.textContent      = pending.length;
-        } else {
-            ghidonPendingSection.style.display = 'none';
-        }
-    }
-
-    // ── Render danh sách đơn ──
-    function ghidonRenderOrders(orders) {
-        if (orders.length === 0) {
-            ghidonOrderList.innerHTML = '<li class="ghidon-order-empty">Chưa có đơn nào hôm nay</li>';
-            return;
-        }
-        const recent = orders.slice(-8).reverse();
-        ghidonOrderList.innerHTML = recent.map(order => `
-            <li class="ghidon-order-item">
-                <span class="ghidon-order-code">${order.ma || '---'}</span>
-                <div class="ghidon-order-meta">
-                    ${order.cod && order.cod !== '0' ? `<span class="ghidon-order-cod">${ghidonFormatMoney(order.cod)}</span>` : ''}
-                    <span class="ghidon-order-time">${ghidonExtractTime(order.time)}</span>
-                    <span class="ghidon-order-ok">✅</span>
-                </div>
-            </li>
-        `).join('');
-    }
-
-    // ── Kiểm tra kết nối Sheet ──
-    async function ghidonCheckConnection() {
-        const s = await ghidonMsg({ action: 'GHIDON_GET_SETTINGS' });
-        if (!s.ghidon_sheetWebAppUrl) {
-            ghidonSetConnStatus('local', '💾 Chưa cấu hình Sheet — Lưu cục bộ');
-            return;
-        }
-        ghidonSetConnStatus('checking', 'Đang kiểm tra kết nối Sheet...');
-        const result = await ghidonMsg({ action: 'GHIDON_TEST_CONNECTION' });
-        if (result && result.success) {
-            ghidonSetConnStatus('connected', '🟢 Đã kết nối Google Sheet');
-        } else {
-            ghidonSetConnStatus('disconnected', `🔴 Lỗi: ${result?.error || 'Không kết nối được'}`);
-        }
-    }
-
-    function ghidonSetConnStatus(type, text) {
-        const colorMap = {
-            connected:    '#10B981',
-            disconnected: '#EE0033',
-            checking:     '#F59E0B',
-            local:        '#94A3B8',
-        };
-        const color = colorMap[type] || colorMap.local;
-        if (ghidonConnDot) { ghidonConnDot.className = 'status-dot'; ghidonConnDot.style.background = color; }
-        if (ghidonConnMsg) ghidonConnMsg.textContent = text;
-        if (ghidonConnectionText) ghidonConnectionText.textContent = text;
-    }
-
-    // ── Toggle enable/disable ──
-    if (ghidonToggle) {
-        ghidonToggle.addEventListener('change', async () => {
-            const enabled = ghidonToggle.checked;
-            await chrome.storage.local.set({ ghidon_enabled: enabled });
-            // Gửi tới content script trên tab active
-            try {
-                const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-                if (tab) await chrome.tabs.sendMessage(tab.id, { action: 'GHIDON_TOGGLE', enabled });
-            } catch (_) {}
-        });
-    }
-
-    // ── Settings collapsible toggle ──
-    if (ghidonSettingsToggle) {
-        ghidonSettingsToggle.addEventListener('click', () => {
-            const isOpen = ghidonSettingsBody.style.display !== 'none';
-            ghidonSettingsBody.style.display = isOpen ? 'none' : 'flex';
-            ghidonSettingsToggle.setAttribute('aria-expanded', !isOpen);
-        });
-    }
-
-    // ── Lưu settings ──
-    if (ghidonSaveSettingsBtn) {
-        ghidonSaveSettingsBtn.addEventListener('click', async () => {
-            const settings = {
-                ghidon_sheetWebAppUrl: ghidonWebAppUrl?.value.trim() || '',
-                ghidon_sheetId:        ghidonSheetId?.value.trim()   || '',
-                ghidon_sheetName:      ghidonSheetName?.value.trim() || 'Trang tính1',
-                ghidon_buuTaName:      ghidonBuuTa?.value.trim()    || '',
-                ghidon_scanInterval:   parseInt(ghidonScanInterval?.value, 10) || 50,
-                ghidon_minBarcodeLen:  parseInt(ghidonMinLen?.value, 10) || 8,
-                ghidon_soundEnabled:   ghidonSoundEnabled?.checked !== false,
-                ghidon_duplicateCheck: ghidonDuplicateCheck?.checked !== false,
-            };
-            await ghidonMsg({ action: 'GHIDON_SAVE_SETTINGS', settings });
-            // Visual feedback
-            const origHTML = ghidonSaveSettingsBtn.innerHTML;
-            ghidonSaveSettingsBtn.innerHTML = '✅ Đã lưu!';
-            ghidonSaveSettingsBtn.disabled  = true;
-            setTimeout(() => {
-                ghidonSaveSettingsBtn.innerHTML = origHTML;
-                ghidonSaveSettingsBtn.disabled  = false;
-            }, 2000);
-            // Re-check connection
-            await ghidonCheckConnection();
-        });
-    }
-
-    // ── Test kết nối ──
-    if (ghidonTestConnBtn) {
-        ghidonTestConnBtn.addEventListener('click', async () => {
-            ghidonTestResult.style.display = 'none';
-            ghidonTestConnBtn.disabled = true;
-            const origHTML = ghidonTestConnBtn.innerHTML;
-            ghidonTestConnBtn.innerHTML = '<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="13" height="13"><path d="M21 12a9 9 0 11-3.36-7.02"/></svg> Đang test...';
-
-            // Save current URL first
-            if (ghidonWebAppUrl?.value.trim()) {
-                await chrome.storage.local.set({ ghidon_sheetWebAppUrl: ghidonWebAppUrl.value.trim() });
-            }
-
-            const result = await ghidonMsg({ action: 'GHIDON_TEST_CONNECTION' });
-
-            ghidonTestResult.style.display = 'block';
-            if (result && result.success) {
-                ghidonTestResult.className   = 'ghidon-test-result is-success';
-                ghidonTestResult.textContent = `✅ Kết nối thành công! ${result.message || ''}`;
-                ghidonSetConnStatus('connected', '🟢 Đã kết nối Google Sheet');
-            } else {
-                ghidonTestResult.className   = 'ghidon-test-result is-error';
-                ghidonTestResult.textContent = `❌ Lỗi: ${result?.error || 'Không kết nối được'}`;
-                ghidonSetConnStatus('disconnected', `🔴 ${result?.error || 'Lỗi kết nối'}`);
-            }
-
-            ghidonTestConnBtn.innerHTML = origHTML;
-            ghidonTestConnBtn.disabled  = false;
-        });
-    }
-
-    // ── Sync pending ──
-    if (ghidonSyncBtn) {
-        ghidonSyncBtn.addEventListener('click', async () => {
-            const origHTML = ghidonSyncBtn.innerHTML;
-            ghidonSyncBtn.innerHTML  = '⏳ Sync...';
-            ghidonSyncBtn.disabled   = true;
-            await ghidonMsg({ action: 'GHIDON_SYNC_PENDING' });
-            setTimeout(async () => {
-                ghidonSyncBtn.innerHTML = origHTML;
-                ghidonSyncBtn.disabled  = false;
-                await ghidonLoadStats();
-            }, 3000);
-        });
-    }
-
-    // ── Reset stats hôm nay ──
-    if (ghidonResetBtn) {
-        ghidonResetBtn.addEventListener('click', async () => {
-            if (!confirm('Reset thống kê hôm nay? (Dữ liệu trên Sheet không bị ảnh hưởng)')) return;
-            await ghidonMsg({ action: 'GHIDON_RESET_TODAY' });
-            await ghidonLoadStats();
-        });
-    }
-
-    // ── Mở Sheet ──
-    if (ghidonOpenSheetBtn) {
-        ghidonOpenSheetBtn.addEventListener('click', async () => {
-            const s = await ghidonMsg({ action: 'GHIDON_GET_SETTINGS' });
-            if (s.ghidon_sheetId) {
-                chrome.tabs.create({ url: `https://docs.google.com/spreadsheets/d/${s.ghidon_sheetId}` });
-            } else {
-                chrome.tabs.create({ url: 'https://docs.google.com/spreadsheets/' });
-            }
-        });
-    }
-
-    // ── Lắng nghe storage changes để refresh stats realtime ──
-    chrome.storage.onChanged.addListener((changes, ns) => {
-        if (ns !== 'local') return;
-        if (changes.__GHIDON_STATS_UPDATED__ || changes.ghidon_todayStats || changes.ghidon_pendingOrders) {
-            ghidonLoadStats();
-        }
-        // Cập nhật trạng thái tài khoản realtime
-        if (changes.ghidon_accountVerified || changes.ghidon_currentUser) {
-            ghidonLoadAccountStatus();
-        }
-    });
-
-    // ── Load & render trạng thái tài khoản ──
-    async function ghidonLoadAccountStatus() {
-        const s = await ghidonMsg({ action: 'GHIDON_GET_SETTINGS' });
-        const verified = s.ghidon_accountVerified;
-        const user     = s.ghidon_currentUser;
-        ghidonRenderAccountStatus(verified, user);
-    }
-
-    function ghidonRenderAccountStatus(verified, user) {
-        if (!ghidonAccountBar) return;
-
-        if (user === null || user === undefined) {
-            // Chưa phát hiện user
-            ghidonAccountBar.className = 'ghidon-account-bar';
-            if (ghidonAccountIcon) ghidonAccountIcon.textContent = '👤';
-            if (ghidonAccountName) ghidonAccountName.textContent = 'Chưa mở trang ViettelPost';
-            if (ghidonWrongAccount) ghidonWrongAccount.style.display = 'none';
-            return;
-        }
-
-        if (verified) {
-            ghidonAccountBar.className = 'ghidon-account-bar is-verified';
-            if (ghidonAccountIcon) ghidonAccountIcon.textContent = '✅';
-            if (ghidonAccountName) ghidonAccountName.textContent = user;
-            if (ghidonWrongAccount) ghidonWrongAccount.style.display = 'none';
-        } else {
-            ghidonAccountBar.className = 'ghidon-account-bar is-invalid';
-            if (ghidonAccountIcon) ghidonAccountIcon.textContent = '⛔';
-            if (ghidonAccountName) ghidonAccountName.textContent = user || 'Không xác định';
-            if (ghidonWrongAccount) ghidonWrongAccount.style.display = 'flex';
-            if (ghidonWrongAccountMsg) {
-                ghidonWrongAccountMsg.textContent =
-                    `Đang đăng nhập: "${user || '?'}" — Cần đăng nhập bằng DƯƠNG THÁI TÂN`;
-            }
-        }
-    }
-
-    // ── Khởi tạo lần đầu ──
-    ghidonInit();
 
 });
