@@ -69,13 +69,23 @@
     --sh-red: 0 4px 14px rgba(238,0,51,.25);
     --sh-red-lg: 0 8px 24px rgba(238,0,51,.3);
 
-    /* ── Radius ── */
-    --r-xs:   4px;
-    --r-sm:   8px;
-    --r-md:   12px;
-    --r-lg:   16px;
-    --r-xl:   20px;
+    /* ── Radius ── [v4.1 Polish] Giảm bo góc cho cảm giác "chuẩn" hơn,
+       ít cartoon-ish. r-md (radius card) giảm mạnh nhất từ 12px → 8px. */
+    --r-xs:   3px;
+    --r-sm:   6px;
+    --r-md:   8px;
+    --r-lg:   10px;
+    --r-xl:   12px;
     --r-pill: 999px;
+
+    /* ── Spacing 8pt grid ── [v4.1] Hệ spacing thống nhất */
+    --sp-1:   4px;
+    --sp-2:   8px;
+    --sp-3:   12px;
+    --sp-4:   16px;
+    --sp-5:   20px;
+    --sp-6:   24px;
+    --sp-8:   32px;
 
     /* ── Font ── */
     --font: 'Be Vietnam Pro', 'Inter', system-ui, -apple-system, sans-serif;
@@ -131,26 +141,14 @@ a { text-decoration: none; }
     overflow: hidden;
 }
 
-/* Subtle shimmer overlay */
+/* Subtle shimmer overlay — [v4.1] tắt: gây phân tán, không cần thiết */
 .app-header::before {
     content: '';
     position: absolute;
-    top: 0; left: -100%; right: 0;
-    width: 300%;
+    top: 0; left: 0; right: 0;
     height: 100%;
-    background: linear-gradient(
-        90deg,
-        transparent 0%,
-        rgba(255,255,255,0.03) 40%,
-        rgba(255,255,255,0.08) 50%,
-        rgba(255,255,255,0.03) 60%,
-        transparent 100%
-    );
-    animation: shimmer 6s ease-in-out infinite;
-}
-@keyframes shimmer {
-    0%   { transform: translateX(-33%); }
-    100% { transform: translateX(33%); }
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent 50%);
+    pointer-events: none;
 }
 
 /* Bottom edge — clean cut */
@@ -178,7 +176,7 @@ a { text-decoration: none; }
 .logo-wrap {
     width: 38px;
     height: 38px;
-    border-radius: 10px;
+    border-radius: var(--r-sm);
     background: rgba(255,255,255,0.15);
     border: 1.5px solid rgba(255,255,255,0.25);
     display: flex;
@@ -186,9 +184,9 @@ a { text-decoration: none; }
     justify-content: center;
     flex-shrink: 0;
     backdrop-filter: blur(4px);
-    transition: transform var(--mid) var(--spring);
+    transition: transform var(--fast) var(--ease);
 }
-.logo-wrap:hover { transform: scale(1.05) rotate(-2deg); }
+.logo-wrap:hover { transform: scale(1.04); }
 .logo-img { width: 24px; height: 24px; object-fit: contain; }
 
 .header-brand { display: flex; flex-direction: column; gap: 2px; }
@@ -376,9 +374,8 @@ a { text-decoration: none; }
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    transition: transform var(--mid) var(--spring);
 }
-.card:hover .card-icon { transform: scale(1.08); }
+/* [v4.1 Polish] Bỏ icon scale spring on hover — distract, không có ý nghĩa */
 
 .icon-red   { background: linear-gradient(135deg, var(--red-pale) 0%, var(--red-pale2) 100%); }
 .icon-red svg { stroke: var(--red); width: 16px; height: 16px; }
@@ -425,6 +422,43 @@ a { text-decoration: none; }
     color: var(--red);
     border-color: var(--red-border);
 }
+
+/* ─────────────────────────────────────────
+   8.5. INPUT MODE TOGGLE  (File Excel | Dán mã)
+───────────────────────────────────────── */
+.input-mode-toggle {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: var(--gray-100);
+    border-radius: var(--r-md);
+    margin-bottom: 12px;
+}
+.mode-btn {
+    flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--tx-secondary);
+    background: transparent;
+    border: none;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--fast), color var(--fast), box-shadow var(--fast);
+}
+.mode-btn:hover { color: var(--tx-primary); }
+.mode-btn.active {
+    background: var(--white);
+    color: var(--red);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.mode-btn svg { flex-shrink: 0; }
+
+.mode-panel { /* container đơn thuần — không thêm visual */ }
 
 /* ─────────────────────────────────────────
    9. TEXTAREA
@@ -520,7 +554,12 @@ a { text-decoration: none; }
     border-radius: var(--r-sm);
     border: 1.5px solid transparent;
     cursor: pointer;
-    transition: all var(--mid) var(--ease);
+    /* [v4.1 Polish] 250ms→150ms cho phản hồi click nhanh hơn,
+       chuyển từ "all" sang chỉ những props thật sự thay đổi */
+    transition: background var(--fast) var(--ease),
+                box-shadow var(--fast) var(--ease),
+                transform var(--fast) var(--ease),
+                border-color var(--fast) var(--ease);
     user-select: none;
     white-space: nowrap;
     text-decoration: none;
@@ -1259,14 +1298,8 @@ button:disabled {
 .footer-heart {
     color: var(--red);
     font-size: 11px;
-    animation: heartbeat 2.2s ease-in-out infinite;
 }
-@keyframes heartbeat {
-    0%,55%,100% { transform: scale(1); }
-    15%          { transform: scale(1.20); }
-    30%          { transform: scale(1.08); }
-    45%          { transform: scale(1.16); }
-}
+/* [v4.1 Polish] Bỏ heartbeat — animation vô hạn không có ý nghĩa thông tin */
 
 /* ─────────────────────────────────────────
    22. FOCUS ACCESSIBLE
@@ -1647,5 +1680,156 @@ button:disabled {
     .file-info-name { color: #6EE7B7; }
     .file-info-clear { color: #6EE7B7; }
     .file-info-clear:hover { background: rgba(110, 231, 183, 0.15); }
+}
+
+/* ─────────────────────────────────────────
+   [Fix #40] REPORT CARD — báo cáo kết quả Sửa Giờ
+───────────────────────────────────────── */
+.report-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    overflow: hidden;
+    box-shadow: var(--sh-sm);
+    margin-top: 12px;
+    animation: slideUp 0.25s var(--ease);
+}
+.report-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--gray-50);
+    border-bottom: 1px solid var(--gray-100);
+}
+.report-tabs {
+    display: flex;
+    gap: 4px;
+    flex: 1;
+}
+.report-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tx-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--fast), color var(--fast), border-color var(--fast);
+}
+.report-tab:hover { color: var(--tx-primary); background: var(--gray-100); }
+.report-tab.active {
+    background: var(--white);
+    border-color: var(--border);
+    color: var(--tx-primary);
+}
+.report-tab[data-report-tab="fail"] svg    { stroke: var(--red); }
+.report-tab[data-report-tab="success"] svg { stroke: var(--green); }
+.report-tab.active[data-report-tab="fail"]    { color: var(--red); }
+.report-tab.active[data-report-tab="success"] { color: var(--green); }
+.report-tab-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 16px;
+    padding: 0 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--tx-secondary);
+    background: var(--gray-200);
+    border-radius: var(--r-pill);
+    font-variant-numeric: tabular-nums;
+}
+.report-tab.active[data-report-tab="fail"] .report-tab-count {
+    background: var(--red-pale);
+    color: var(--red);
+}
+.report-tab.active[data-report-tab="success"] .report-tab-count {
+    background: var(--green-pale);
+    color: var(--green);
+}
+
+.report-copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--tx-secondary);
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    cursor: pointer;
+    transition: background var(--fast), color var(--fast), border-color var(--fast);
+}
+.report-copy-btn:hover {
+    background: var(--gray-50);
+    color: var(--tx-primary);
+    border-color: var(--gray-300);
+}
+
+.report-body {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 6px;
+    background: var(--white);
+}
+.report-body::-webkit-scrollbar { width: 6px; }
+.report-body::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: var(--r-pill); }
+
+.report-empty {
+    padding: 18px 10px;
+    text-align: center;
+    font-size: 12.5px;
+    color: var(--tx-muted);
+}
+
+.report-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    transition: background var(--fast);
+}
+.report-item + .report-item { margin-top: 2px; }
+.report-item:hover { background: var(--gray-50); }
+.report-item.is-fail    { border-left: 2px solid var(--red);   padding-left: 8px; }
+.report-item.is-success { border-left: 2px solid var(--green); padding-left: 8px; }
+
+.report-item-num {
+    flex-shrink: 0;
+    min-width: 22px;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--tx-muted);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+    padding-top: 1px;
+}
+.report-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+.report-item-bill {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--tx-primary);
+    font-family: 'SF Mono', Consolas, 'Courier New', monospace;
+    word-break: break-all;
+}
+.report-item-reason {
+    font-size: 11px;
+    color: var(--tx-secondary);
+    line-height: 1.4;
 }
 

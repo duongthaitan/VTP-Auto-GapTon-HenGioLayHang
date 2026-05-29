@@ -87,10 +87,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     let _customerMap      = new Map(); // Map<TEN_KHGUI, MA_PHIEUGUI[]>
     let _selectedCustomer = null;
     let _activeIdx        = -1;
+    // [Fix #37] Chế độ nhập mã đơn: 'excel' (mặc định) hoặc 'paste'
+    let _inputMode        = 'excel';
+    let _pastedBills      = [];
 
     function parseBills() {
+        if (_inputMode === 'paste') {
+            // [Fix #38] Đọc trực tiếp từ textarea, KHÔNG qua cache _pastedBills
+            // — tránh race với debounce 150ms khi user paste rồi click Start ngay.
+            const ta = document.getElementById('pasteBillsInput');
+            return parsePastedBills(ta ? ta.value : '');
+        }
         if (!_selectedCustomer) return [];
         return _customerMap.get(_selectedCustomer) || [];
+    }
+
+    /**
+     * [Fix #37] Parse nội dung textarea → mảng mã đơn.
+     * Tách theo newline / phẩy / chấm phẩy / tab / khoảng trắng.
+     * Chuẩn hoá NBSP→space, trim, bỏ rỗng, KHỬ TRÙNG LẶP giữ thứ tự.
+     */
+    function parsePastedBills(text) {
+        if (!text) return [];
+        const seen = new Set();
+        const out = [];
+        for (const tok of String(text).split(/[\s,;]+/)) {
+            const cleaned = tok
+                .replace(/ /g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (!cleaned || seen.has(cleaned)) continue;
+            seen.add(cleaned);
+            out.push(cleaned);
+        }
+        return out;
     }
 
     function setFileInfo(fileName, totalOrders) {
@@ -325,6 +355,57 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (f) handleFileChosen(f);
     });
 
+    // ════════════════════════════════════════
+    //  [Fix #37] INPUT MODE TOGGLE + PASTE BILLS
+    //  2 chế độ loại trừ nhau: 'excel' (file picker)  /  'paste' (textarea)
+    // ════════════════════════════════════════
+    const modeExcelBtn      = document.getElementById('modeExcelBtn');
+    const modePasteBtn      = document.getElementById('modePasteBtn');
+    const modePanelExcel    = document.getElementById('modePanelExcel');
+    const modePanelPaste    = document.getElementById('modePanelPaste');
+    const pasteBillsInput   = document.getElementById('pasteBillsInput');
+    const pasteCountBadge   = document.getElementById('pasteCount');
+
+    function setInputMode(mode) {
+        _inputMode = (mode === 'paste') ? 'paste' : 'excel';
+        const isPaste = _inputMode === 'paste';
+
+        modePanelExcel.style.display = isPaste ? 'none' : '';
+        modePanelPaste.style.display = isPaste ? '' : 'none';
+
+        modeExcelBtn.classList.toggle('active', !isPaste);
+        modePasteBtn.classList.toggle('active', isPaste);
+        modeExcelBtn.setAttribute('aria-selected', String(!isPaste));
+        modePasteBtn.setAttribute('aria-selected', String(isPaste));
+
+        try { chrome.storage.session?.set({ vtpInputMode: _inputMode }); } catch (_) {}
+    }
+
+    function refreshPasteCount() {
+        const n = _pastedBills.length;
+        if (n > 0) {
+            pasteCountBadge.textContent = `${n.toLocaleString('vi-VN')} đơn`;
+            pasteCountBadge.style.display = 'inline-flex';
+            pasteCountBadge.classList.add('has-bills');
+        } else {
+            pasteCountBadge.style.display = 'none';
+        }
+    }
+
+    modeExcelBtn.addEventListener('click', () => setInputMode('excel'));
+    modePasteBtn.addEventListener('click', () => setInputMode('paste'));
+
+    // Parse textarea (debounce 150ms để không tốn CPU khi user gõ nhanh)
+    let _pasteTimer = null;
+    pasteBillsInput.addEventListener('input', () => {
+        clearTimeout(_pasteTimer);
+        _pasteTimer = setTimeout(() => {
+            _pastedBills = parsePastedBills(pasteBillsInput.value);
+            refreshPasteCount();
+            try { chrome.storage.session?.set({ vtpPastedText: pasteBillsInput.value }); } catch (_) {}
+        }, 150);
+    });
+
     // Search (debounced)
     let _searchTimer = null;
     customerSearch.addEventListener('input', () => {
@@ -383,7 +464,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Restore session
     try {
         chrome.storage.session?.get(
-            ['vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer'],
+            ['vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer',
+             'vtpInputMode', 'vtpPastedText'],
             (data) => {
                 if (data?.vtpCustomerMap && data.vtpCustomerMap.length > 0) {
                     _customerMap = new Map(data.vtpCustomerMap);
@@ -395,6 +477,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                     if (data.vtpSelectedCustomer && _customerMap.has(data.vtpSelectedCustomer)) {
                         selectCustomer(data.vtpSelectedCustomer);
                     }
+                }
+                // [Fix #37] Khôi phục mã đã dán + chế độ
+                if (data?.vtpPastedText) {
+                    pasteBillsInput.value = data.vtpPastedText;
+                    _pastedBills = parsePastedBills(data.vtpPastedText);
+                    refreshPasteCount();
+                }
+                if (data?.vtpInputMode === 'paste') {
+                    setInputMode('paste');
                 }
             }
         );
@@ -454,6 +545,93 @@ document.addEventListener('DOMContentLoaded', async () => {
             progressCard.style.display = 'none';
         }
     }
+
+    // ════════════════════════════════════════
+    //  [Fix #40] BÁO CÁO KẾT QUẢ — sau khi chạy xong
+    // ════════════════════════════════════════
+    const reportCard         = document.getElementById('reportCard');
+    const reportBody         = document.getElementById('reportBody');
+    const reportTabFail      = document.getElementById('reportTabFail');
+    const reportTabSuccess   = document.getElementById('reportTabSuccess');
+    const reportFailCount    = document.getElementById('reportFailCount');
+    const reportSuccessCount = document.getElementById('reportSuccessCount');
+    const reportCopyBtn      = document.getElementById('reportCopyBtn');
+    const reportCopyLabel    = document.getElementById('reportCopyLabel');
+
+    let _reportFail    = [];   // [{bill, reason}]
+    let _reportSuccess = [];   // [bill]
+    let _reportTab     = 'fail';
+
+    function escapeHtml(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function renderReportBody() {
+        const items = _reportTab === 'fail' ? _reportFail : _reportSuccess;
+        if (items.length === 0) {
+            reportBody.innerHTML = `<div class="report-empty">${
+                _reportTab === 'fail'
+                    ? 'Không có đơn nào thất bại 🎉'
+                    : 'Chưa có đơn nào thành công'
+            }</div>`;
+            return;
+        }
+        if (_reportTab === 'fail') {
+            reportBody.innerHTML = items.map((it, i) => `
+                <div class="report-item is-fail">
+                    <span class="report-item-num">${i + 1}</span>
+                    <div class="report-item-main">
+                        <span class="report-item-bill">${escapeHtml(it.bill)}</span>
+                        <span class="report-item-reason">${escapeHtml(it.reason)}</span>
+                    </div>
+                </div>`).join('');
+        } else {
+            reportBody.innerHTML = items.map((bill, i) => `
+                <div class="report-item is-success">
+                    <span class="report-item-num">${i + 1}</span>
+                    <span class="report-item-bill">${escapeHtml(bill)}</span>
+                </div>`).join('');
+        }
+    }
+
+    function setReportTab(tab) {
+        _reportTab = (tab === 'success') ? 'success' : 'fail';
+        reportTabFail.classList.toggle('active', _reportTab === 'fail');
+        reportTabSuccess.classList.toggle('active', _reportTab === 'success');
+        renderReportBody();
+    }
+
+    function renderReport(successList, failList) {
+        _reportSuccess = successList || [];
+        _reportFail    = failList    || [];
+        reportFailCount.textContent    = _reportFail.length;
+        reportSuccessCount.textContent = _reportSuccess.length;
+        // Mặc định mở tab "Thất bại" nếu có fail, ngược lại mở "Thành công"
+        setReportTab(_reportFail.length > 0 ? 'fail' : 'success');
+        reportCard.style.display = 'block';
+    }
+
+    reportTabFail.addEventListener('click',    () => setReportTab('fail'));
+    reportTabSuccess.addEventListener('click', () => setReportTab('success'));
+
+    reportCopyBtn.addEventListener('click', async () => {
+        const items = _reportTab === 'fail' ? _reportFail : _reportSuccess;
+        if (items.length === 0) return;
+        const text = _reportTab === 'fail'
+            ? items.map(it => `${it.bill}\t${it.reason}`).join('\n')
+            : items.join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            const original = reportCopyLabel.textContent;
+            reportCopyLabel.textContent = '✓ Đã copy';
+            setTimeout(() => { reportCopyLabel.textContent = original; }, 1400);
+        } catch (e) {
+            console.warn('[VTP] Copy thất bại:', e);
+            alert('Không copy được vào clipboard.');
+        }
+    });
 
     // ════════════════════════════════════════
     //  RESTORE STATE — khi mở lại popup
@@ -555,7 +733,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         const delay = parseInt(delayInput.value) || 4;
 
         if (bills.length === 0) {
-            if (!_selectedCustomer) {
+            // [Fix #37] Thông báo theo chế độ đang dùng
+            if (_inputMode === 'paste') {
+                alert('Vui lòng dán ít nhất 1 mã đơn vào ô bên trên!');
+            } else if (!_selectedCustomer) {
                 alert('Vui lòng chọn file Excel và chọn khách hàng trước khi chạy!');
             } else {
                 alert('Khách hàng đã chọn không có đơn nào.');
@@ -575,6 +756,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         startChinhGioBtn.disabled  = true;
         startChinhGioBtn.innerHTML = BTN_HTML.startRunning;
 
+        // [Fix #40] Ẩn báo cáo của phiên trước khi bắt đầu phiên mới
+        if (reportCard) reportCard.style.display = 'none';
+
         await chrome.storage.local.set({
             billList:     bills,
             delay,
@@ -585,6 +769,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // ── Vòng lặp chính — chạy ở sidepanel (KHÔNG bị throttle) ──
         const skipList = [];
+        const successList = []; // [Fix #40] thu thập mã đơn thành công để báo cáo
 
         // [Fix #24] Helper: inject + chờ kết quả 1 đơn, có retry khi 'busy'/'timeout'
         async function runOneBillWithRetry(bill, maxAttempts = 2) {
@@ -664,6 +849,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                         await chrome.storage.local.set({ currentIndex: i + 1 });
                     }
                 }
+            } else if (result.status === 'success') {
+                // [Fix #40] Thu thập đơn thành công để báo cáo cuối phiên
+                successList.push(result.bill || bills[i]);
             }
 
             // Cập nhật progress
@@ -689,6 +877,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (statusMsg) statusMsg.textContent      = `⚠️ Xong — Bỏ qua ${skipList.length} đơn`;
             if (statusDot) statusDot.style.background = '#f59e0b';
             console.warn('[VTP Sửa Giờ] Đơn bị bỏ qua:', skipList);
+        }
+
+        // [Fix #40] Hiển thị báo cáo kết quả (chỉ khi có ít nhất 1 đơn đã chạy)
+        if (successList.length + skipList.length > 0) {
+            renderReport(successList, skipList);
         }
 
         // Reset UI
