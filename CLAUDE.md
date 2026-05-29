@@ -28,6 +28,17 @@ Two independent modules share one Side Panel UI. They differ in **how** they get
 | 1. Sửa Giờ ([src/modules/chinhgio/](src/modules/chinhgio/)) | Side panel button | `chrome.scripting.executeScript` from [sidepanel.js](src/ui/sidepanel.js) per bill, `world: 'MAIN'` |
 | 2. Kiểm Kê Tuyến ([src/modules/kiemke/](src/modules/kiemke/)) | Side panel button | `chrome.scripting.executeScript` per route, `world: 'MAIN'` |
 
+[background.js](background.js) is a thin service worker — its only job is `chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })` so clicking the toolbar icon opens the panel. No message routing happens here; the side panel does all orchestration.
+
+### Where Sửa Giờ gets its bill list (Excel picker)
+
+Module 1 does **not** take a pasted textarea of tracking numbers. The side panel loads an `.xlsx` file through [src/shared/xlsx_parser.js](src/shared/xlsx_parser.js) (`window.VTPXlsx`), groups rows by customer, and the selected customer's orders become the per-bill loop input:
+
+- The file **must** contain columns `TEN_KHGUI` (customer name) and `MA_PHIEUGUI` (tracking number) — [sidepanel.js](src/ui/sidepanel.js) hard-errors otherwise.
+- `VTPXlsx.groupBy(byHeader, 'TEN_KHGUI', 'MA_PHIEUGUI')` returns a `Map<customer, trackingNumber[]>` sorted by order count descending; this drives the searchable customer checklist UI.
+- `xlsx_parser.js` is a **dependency-free** XLSX reader: it parses the ZIP container by hand (EOCD → central directory → local file headers) and inflates `deflate` entries with the browser-native `DecompressionStream('deflate-raw')`. ZIP64 files are explicitly rejected. There is no SheetJS / npm dependency — keep it that way (no build step).
+- It reads only `xl/worksheets/sheet1.xml` (first sheet) and resolves `sharedStrings` / `inlineStr` / number cells. Cell-attribute order is not assumed (see `Fix #29`). Keys and values are NBSP-normalized in `groupBy` (`Fix #31`).
+
 ### The MAIN-world / ISOLATED-world trap
 
 Both modules are injected with `world: 'MAIN'` so they can touch the page's ZK Framework objects. **`chrome.*` APIs are not available in MAIN world** — including `chrome.storage.local.set`. This has bitten the codebase repeatedly (see `Fix #23` in [sidepanel.js](src/ui/sidepanel.js)).
