@@ -17,6 +17,31 @@
 //        • closeOpenForms: 800ms→250ms (Bootstrap fade ~150ms),
 //          Escape fallback: 600ms→200ms
 //        → Tiết kiệm ~4.5 giây/đơn, không ảnh hưởng độ tin cậy.
+//    [Fix #33] Sửa lỗi "thao tác nhanh hơn mạng" — khớp nhầm kết quả đơn cũ:
+//        • Dọn sạch form/modal/button.select-down của ĐƠN TRƯỚC ở đầu
+//          processOneBill trước khi search → tránh waitForElement khớp
+//          phần tử cũ khi AJAX đơn mới chưa về.
+//        • waitForAjaxCycle(): chờ TRỌN chu kỳ loading (hiện→ẩn) sau khi
+//          search, bảo đảm bảng kết quả là của đơn mới, không phải bảng cũ.
+//        • searchBtn null → fallback nhấn Enter thay vì chạy tiếp mù.
+//    [Fix #34] Đúng theo DOM thật (Angular Material, không phải Bootstrap):
+//        • Bỏ "Tầng 1" chờ .modal-dialog/.modal.in — selector Bootstrap
+//          không tồn tại trên trang này. Dùng button.select-down làm tín
+//          hiệu form sẵn sàng (gộp còn 1 tầng).
+//        • Chọn ngày theo TEXT (Ngày kia→Ngày mai→Hôm nay) thay vì id
+//          1_apt/2_apt — id ĐỘNG theo option khả dụng nên chọn theo id
+//          gây đặt NHẦM ngày hàng loạt.
+//    [Fix #35] Chờ AJAX sau khi chọn ngày + không bấm Cập nhật mù:
+//        • waitForAjaxCycle sau click ngày → phòng khung giờ nạp qua AJAX
+//          khi mạng chậm (trước đây hết giờ → bỏ sót "Cả ngày").
+//        • Tăng timeout "Cả ngày" 4s→8s. Không thấy "Cả ngày" → skip đơn,
+//          KHÔNG bấm Cập nhật (tránh cập nhật thiếu khung giờ).
+//        • Bọc BƯỚC 6 (Cập nhật) trong if(!shouldSkip).
+//    [Fix #36] closeOpenForms + LOADING_SELECTORS cho Angular Material:
+//        • closeOpenForms: thêm selector Material (mat-dialog-close…) +
+//          tìm nút đóng theo TEXT (Đóng/Hủy/Thoát) → bền với class động;
+//          giữ Bootstrap + Escape làm fallback nhiều tầng.
+//        • LOADING_SELECTORS: thêm mat-spinner/mat-progress/cdk-overlay.
 // ============================================================
 
 if (window.__VTP_CHINHGIO_RUNNING__) {
@@ -127,6 +152,62 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
     };
 
     /**
+     * [Fix #33] Tập selector loading bao quát (ZK + Bootstrap/FontAwesome).
+     * [Fix #36] Bổ sung spinner Angular Material (mat-spinner, mat-progress-*,
+     * cdk-overlay backdrop) vì trang Sửa Giờ chạy Angular Material.
+     * Nếu trang dùng class spinner riêng khác, bổ sung vào đây.
+     */
+    const LOADING_SELECTORS = [
+        // ZK
+        '.z-loading-indicator', '.z-apply-loading-indicator', '.z-listbox-loading',
+        // Angular Material
+        'mat-spinner', '.mat-spinner', '.mat-progress-spinner', '.mat-progress-bar',
+        '.cdk-overlay-backdrop-showing',
+        // Bootstrap / FontAwesome / chung
+        '.loading-overlay', '.loading', '.spinner-border', '.spinner',
+        '.fa-spinner.fa-spin', 'i.fa-spin', '[class*="loading"]'
+    ].join(', ');
+
+    const isLoadingVisible = () => {
+        const el = document.querySelector(LOADING_SELECTORS);
+        return !!(el && el.offsetParent !== null &&
+            getComputedStyle(el).display !== 'none' &&
+            getComputedStyle(el).visibility !== 'hidden');
+    };
+
+    /**
+     * [Fix #33] Chờ TRỌN một chu kỳ AJAX: loading XUẤT HIỆN rồi BIẾN MẤT.
+     * Đây là tín hiệu đáng tin nhất cho "server đã trả kết quả đơn mới" —
+     * tránh khớp nhầm bảng/menu của đơn TRƯỚC khi mạng chậm.
+     *
+     * Trả về:
+     *   true  → đã đi qua 1 chu kỳ loading (DOM hiện tại là của đơn mới)
+     *   false → không phát hiện loading trong appearMs (mạng quá nhanh
+     *           hoặc selector không khớp) → caller tự fallback.
+     */
+    const waitForAjaxCycle = (appearMs = 2500, goneMs = 15000) => {
+        const watch = (predicate, timeout) => new Promise((resolve) => {
+            if (predicate()) return resolve(true);
+            let tid = null;
+            const obs = new MutationObserver(() => {
+                if (predicate()) { obs.disconnect(); clearTimeout(tid); resolve(true); }
+            });
+            obs.observe(document.body, {
+                childList: true, subtree: true,
+                attributes: true, attributeFilter: ['style', 'class']
+            });
+            tid = setTimeout(() => { obs.disconnect(); resolve(false); }, timeout);
+        });
+
+        // Pha 1: chờ loading xuất hiện
+        return watch(isLoadingVisible, appearMs).then((appeared) => {
+            if (!appeared) return false;
+            // Pha 2: chờ loading biến mất (timeout vẫn coi như xong để không treo)
+            return watch(() => !isLoadingVisible(), goneMs).then(() => true);
+        });
+    };
+
+    /**
      * Mô phỏng thao tác gõ phím cho Angular/ZK input.
      */
     const setInputValue = (inputElement, value) => {
@@ -137,38 +218,74 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
     /**
      * [Mới v2.0] Tự động đóng modal / dialog đang mở.
-     * Thử nhiều selector phổ biến trên trang ViettelPost.
+     * [Fix #36] Trang Sửa Giờ là Angular Material — selector Bootstrap cũ
+     * (.modal-footer, .modal-header .close, data-dismiss) gần như không khớp.
+     * Bổ sung selector Material + tìm nút theo TEXT ("Đóng"/"Hủy"/"Thoát"),
+     * vì đây là cách bền nhất khi class động. Giữ selector Bootstrap cũ +
+     * Escape làm fallback nhiều tầng.
+     * [Fix #39] AN TOÀN — whitelist EXACT text, không dùng startsWith.
+     * Trước đây "hủy" / "bỏ qua" có thể khớp "Hủy đơn" / "Bỏ qua đơn" và
+     * vô tình HỦY ĐƠN HÀNG khi recovery. Đảo thứ tự: Escape ưu tiên trước
+     * text matching — Escape không bao giờ click nhầm action nguy hiểm.
      */
     async function closeOpenForms() {
+        // Tầng A: selector trực tiếp — CHỈ những selector đặc trưng cho
+        // "đóng dialog/modal", KHÔNG dùng selector mơ hồ có thể trùng nút
+        // hủy đơn (vd .mat-dialog-actions button[color=warn], button.cancel).
         const closeSelectors = [
+            // Angular Material — attribute đặc trưng cho mat-dialog-close
+            'button.mat-dialog-close',
+            'button[mat-dialog-close]',
+            // Bootstrap close icon (X góc form)
             'button.btn-close',
-            '.modal-footer button.btn-default',
-            '.modal button[data-dismiss="modal"]',
-            'button.cancel',
             'button[aria-label="Close"]',
             '.modal-header .close',
+            // FontAwesome X
             'i.fa-times'
         ];
-
         for (const sel of closeSelectors) {
-            const btn = document.querySelector(sel);
-            if (btn) {
+            const el = document.querySelector(sel);
+            if (el) {
+                // [Fix #39] Nếu là icon (i.fa-times…), click parent button
+                const target = (el.tagName === 'I' && el.parentElement) ? el.parentElement : el;
                 console.log(`[VTP Sửa Giờ] Đóng form bằng selector: ${sel}`);
-                btn.click();
-                // [Fix #25] 800ms→250ms — Bootstrap modal fade animation chỉ ~150ms
+                target.click();
                 await sleep(250);
                 return;
             }
         }
 
-        // Nếu không tìm thấy nút đóng, thử nhấn Escape
+        // Tầng B: [Fix #39] Escape — universal close, KHÔNG thể bấm nhầm
+        // action destructive (hủy đơn/sửa đơn). Material respect Escape mặc định.
         document.dispatchEvent(new KeyboardEvent('keydown', {
-            key:     'Escape',
-            keyCode: 27,
-            bubbles: true
+            key: 'Escape', keyCode: 27, bubbles: true
         }));
-        // [Fix #25] 600ms→200ms
         await sleep(200);
+        // Nếu Escape đã đóng được button.select-down → xong.
+        if (!document.querySelector('button.select-down')) return;
+
+        // Tầng C: [Fix #39] Text matching — CHỈ EXACT MATCH với whitelist hẹp,
+        // KHÔNG startsWith. Bỏ "hủy" và "bỏ qua" đơn lẻ vì có thể trùng
+        // "Hủy đơn" / "Bỏ qua đơn" → click sẽ hủy đơn hàng thật.
+        // Giữ "hủy bỏ"/"huỷ bỏ" (rõ nghĩa "discard"), "đóng lại", "thoát ra".
+        const SAFE_CLOSE_TEXTS = new Set([
+            'đóng', 'đóng lại',
+            'hủy bỏ', 'huỷ bỏ',
+            'thoát', 'thoát ra',
+            'quay lại', 'trở lại',
+            'cancel', 'close'
+        ]);
+        const normTxt = (s) => (s || '')
+            .replace(/ /g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+        const btns = Array.from(document.querySelectorAll(
+            'button, .mat-dialog-container a, [role="button"]'
+        ));
+        const closeBtn = btns.find(b => SAFE_CLOSE_TEXTS.has(normTxt(b.innerText || b.textContent)));
+        if (closeBtn) {
+            console.log(`[VTP Sửa Giờ] Đóng form bằng text exact: "${closeBtn.innerText.trim()}"`);
+            closeBtn.click();
+            await sleep(250);
+        }
     }
 
     // ─── Xử lý 1 đơn duy nhất ───────────────────────────────
@@ -209,6 +326,16 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             // ═══════════════════════════════════════════
             // BƯỚC 1: Đảm bảo đang ở trang tìm kiếm
             // ═══════════════════════════════════════════
+            // [Fix #33] Dọn sạch DOM của ĐƠN TRƯỚC trước khi search đơn mới.
+            // Nếu form/modal cũ còn sót, các waitForElement bên dưới sẽ khớp
+            // nhầm phần tử cũ khi mạng chậm → thao tác sai đơn. Đóng form và
+            // chờ khu vực chọn giờ cũ biến mất hẳn.
+            if (document.querySelector('button.select-down') ||
+                document.querySelector('.modal-dialog, .modal-content, .modal.in')) {
+                await closeOpenForms();
+                await waitForElementGone('button.select-down', 5000);
+            }
+
             let searchInput = document.querySelector('input#frm_keyword');
             if (!searchInput) {
                 console.log('[VTP Sửa Giờ] Không ở trang tìm kiếm, thử đóng form...');
@@ -229,7 +356,26 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                 () => document.querySelector('button.btn-viettel i.fa-search')?.parentElement,
                 3000
             );
-            if (searchBtn) searchBtn.click();
+            // [Fix #33] Bắt buộc phải kích hoạt search. Không có nút → fallback
+            // nhấn Enter trên ô input. Nếu cả hai bất khả thi thì throw, KHÔNG
+            // chạy tiếp (tránh đọc bảng kết quả của đơn trước).
+            if (searchBtn) {
+                searchBtn.click();
+            } else {
+                searchInput.dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Enter', keyCode: 13, which: 13, bubbles: true
+                }));
+                searchInput.dispatchEvent(new KeyboardEvent('keypress', {
+                    key: 'Enter', keyCode: 13, which: 13, bubbles: true
+                }));
+                console.warn('[VTP Sửa Giờ] Không thấy nút search, dùng fallback Enter.');
+            }
+
+            // [Fix #33] Chờ TRỌN chu kỳ AJAX search (loading hiện → ẩn) để chắc
+            // chắn bảng kết quả là của ĐƠN MỚI, không phải bảng cũ còn sót.
+            // Mạng chậm: chu kỳ này có thể vài giây — đó chính là lúc trước đây
+            // tool thao tác nhầm trên kết quả cũ.
+            await waitForAjaxCycle(2500, 15000);
 
             // ═══════════════════════════════════════════
             // BƯỚC 3: Mở menu Sửa đơn
@@ -256,79 +402,84 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             editBtnSpan.parentElement.click();
 
             // ═══════════════════════════════════════════
-            // BƯỚC 4: Phát hiện 2 tầng (v2.0)
+            // BƯỚC 4: Chờ form sửa đơn sẵn sàng
             //
-            //   Tầng 1: Form sửa đơn có mở không? (8s)
-            //   Tầng 2: Khu vực chọn giờ có tồn tại? (8s)
+            //   [Fix #34] Trang Sửa Giờ là Angular Material — KHÔNG có
+            //   .modal Bootstrap. Tín hiệu form mở & sẵn sàng thao tác =
+            //   button.select-down ("Chọn thời gian") xuất hiện. Bỏ "Tầng 1"
+            //   cũ (chờ .modal-dialog/.modal.in) vì selector đó không tồn tại
+            //   trên trang này → chỉ gây false-skip hoặc chờ vô ích.
             //
-            //   → Nếu thiếu tầng nào: skip sạch, không treo
+            //   Không có button.select-down sau 10s → đơn không cho sửa giờ.
             // ═══════════════════════════════════════════
+            const timeSelectBtn = await waitForElement('button.select-down', 10000);
 
-            // ── Tầng 1: Chờ form sửa đơn mở (bất kỳ modal nào) ──
-            // [Fix #24] 3s→8s: ở background tab, animation modal có thể chậm
-            const formOpened = await waitForElement(
-                '.modal-dialog, .modal-content, .modal.in, [class*="modal"][style*="display: block"]',
-                8000
-            );
-
-            if (!formOpened) {
-                // Form không mở → bỏ qua, thử đóng UI thừa
+            if (!timeSelectBtn) {
                 await closeOpenForms();
                 shouldSkip = true;
-                skipReason = 'Form sửa đơn không mở được';
-            }
+                skipReason = 'Đơn không hỗ trợ sửa giờ lấy hàng';
+            } else {
+                // ═════════════════════════════════════
+                // BƯỚC 5: Thao tác chọn giờ
+                // ═════════════════════════════════════
+                timeSelectBtn.click();
 
-            // ── Tầng 2: Chờ khu vực chọn giờ (button.select-down) ──
-            if (!shouldSkip) {
-                // [Fix #25] Bỏ sleep(delayMs) cố định trước đây (4s mặc định).
-                // waitForElement bên dưới dùng MutationObserver sẽ phát hiện
-                // button.select-down ngay khi form render xong → không cần
-                // chờ tĩnh. Vẫn giữ var delayMs cho backward-compat (không dùng).
-
-                // [Fix #24] 3s→8s
-                const timeSelectBtn = await waitForElement(
-                    'button.select-down',
-                    8000
+                // Chờ panel ngày render (radio name="day", label[for$="_apt"])
+                await waitForElementBy(
+                    () => document.querySelector('label[for$="_apt"]'),
+                    4000
                 );
 
-                if (!timeSelectBtn) {
-                    // Form mở nhưng không có khu vực chọn giờ
-                    // Lý do: đơn đã hoàn thành / không cho phép sửa giờ
+                // [Fix #34] Chọn ngày theo TEXT, KHÔNG theo id.
+                // DOM thật cho thấy id (1_apt/2_apt) ĐỘNG theo các option còn
+                // khả dụng — vd label[for="1_apt"] có thể là "Ngày kia". Chọn
+                // theo id như code cũ → đặt NHẦM ngày hàng loạt.
+                // Ưu tiên: Ngày kia → Ngày mai → Hôm nay; fallback option đầu.
+                const norm = (s) => (s || '')
+                    .replace(/ /g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+                const dayLabels = Array.from(document.querySelectorAll('label[for$="_apt"]'));
+                let chosenDay = null;
+                for (const want of ['ngày kia', 'ngày mai', 'hôm nay']) {
+                    const lbl = dayLabels.find(l => norm(l.innerText).includes(want));
+                    if (lbl) { lbl.click(); chosenDay = lbl.innerText.trim(); break; }
+                }
+                if (!chosenDay && dayLabels.length) {
+                    dayLabels[0].click();
+                    chosenDay = dayLabels[0].innerText.trim();
+                }
+                console.log('[VTP Sửa Giờ] Chọn ngày:', chosenDay || '(không thấy option ngày)');
+
+                // [Fix #35] Sau khi chọn ngày, danh sách KHUNG GIỜ có thể nạp
+                // qua AJAX. Chờ trọn chu kỳ loading (nếu có) trước khi tìm
+                // "Cả ngày" — nếu không, mạng chậm sẽ làm waitForElementBy hết
+                // giờ → bỏ sót "Cả ngày" nhưng vẫn bấm Cập nhật (cập nhật thiếu).
+                // appearMs ngắn (1500ms): không có AJAX thì trả false ngay,
+                // không làm chậm trường hợp khung giờ render đồng bộ.
+                await waitForAjaxCycle(1500, 12000);
+
+                // [Fix #24] Chờ "Cả ngày" render thay vì sleep cố định
+                // [Fix #35] 4s→8s: phòng khung giờ về chậm khi tab background
+                const labelCaNgay = await waitForElementBy(
+                    () => Array.from(document.querySelectorAll('label.lb-time'))
+                               .find(lbl => norm(lbl.innerText).includes('cả ngày')),
+                    8000
+                );
+                if (labelCaNgay) {
+                    labelCaNgay.click();
+                } else {
+                    // [Fix #35] Không tìm thấy "Cả ngày" → KHÔNG bấm Cập nhật mù,
+                    // skip đơn để tránh cập nhật thiếu khung giờ.
+                    console.warn('[VTP Sửa Giờ] Không tìm thấy khung giờ "Cả ngày"');
                     await closeOpenForms();
                     shouldSkip = true;
-                    skipReason = 'Đơn không hỗ trợ sửa giờ lấy hàng';
-                } else {
-                    // ═════════════════════════════════════
-                    // BƯỚC 5: Thao tác chọn giờ
-                    // ═════════════════════════════════════
-                    timeSelectBtn.click();
+                    skipReason = 'Không tải được khung giờ "Cả ngày"';
+                }
 
-                    // [Fix #24] Chờ panel chọn ngày xuất hiện qua observer
-                    const dayLabel = await waitForElementBy(
-                        () => document.querySelector('label[for="2_apt"]') ||
-                              document.querySelector('label[for="1_apt"]'),
-                        4000
-                    );
-                    // Ưu tiên ngày kia → ngày mai
-                    const labelNgayKia = document.querySelector('label[for="2_apt"]');
-                    const labelNgayMai = document.querySelector('label[for="1_apt"]');
-                    if      (labelNgayKia) labelNgayKia.click();
-                    else if (labelNgayMai) labelNgayMai.click();
-                    else {
-                        console.warn('[VTP Sửa Giờ] Không tìm thấy label ngày, thử tiếp tục...');
-                    }
-
-                    // [Fix #24] Chờ "Cả ngày" render thay vì sleep cố định
-                    const labelCaNgay = await waitForElementBy(
-                        () => Array.from(document.querySelectorAll('label.lb-time'))
-                                   .find(lbl => lbl.innerText.includes('Cả ngày')),
-                        4000
-                    );
-                    if (labelCaNgay) labelCaNgay.click();
-
-                    // ═════════════════════════════════════
-                    // BƯỚC 6: Cập nhật và đợi form đóng
-                    // ═════════════════════════════════════
+                // ═════════════════════════════════════
+                // BƯỚC 6: Cập nhật và đợi form đóng
+                // ═════════════════════════════════════
+                // [Fix #35] Chỉ bấm Cập nhật khi chưa bị skip ở bước chọn giờ.
+                if (!shouldSkip) {
                     // [Fix #24] Chờ nút Cập nhật render
                     const updateBtn = await waitForElementBy(
                         () => Array.from(document.querySelectorAll('button.btn-viettel.btn-block'))
@@ -343,15 +494,15 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                         skipReason = 'Không tìm thấy nút Cập nhật';
                         await closeOpenForms();
                     }
+                }
 
-                    if (!shouldSkip) {
-                        // [Fix #24] Chờ form đóng qua MutationObserver, không dùng polling sleep
-                        // Tăng 6s→15s — server VTP đôi khi chậm response
-                        const formClosed = await waitForElementGone('button.select-down', 15000);
-                        if (!formClosed) {
-                            console.warn('[VTP Sửa Giờ] Form chưa đóng sau 15s, buộc đóng...');
-                            await closeOpenForms();
-                        }
+                if (!shouldSkip) {
+                    // [Fix #24] Chờ form đóng qua MutationObserver, không dùng polling sleep
+                    // Tăng 6s→15s — server VTP đôi khi chậm response
+                    const formClosed = await waitForElementGone('button.select-down', 15000);
+                    if (!formClosed) {
+                        console.warn('[VTP Sửa Giờ] Form chưa đóng sau 15s, buộc đóng...');
+                        await closeOpenForms();
                     }
                 }
             }
