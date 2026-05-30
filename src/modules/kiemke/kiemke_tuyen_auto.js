@@ -1,12 +1,21 @@
 // ============================================================
-//  VTP Tool – Kiểm Kê Tuyến Auto  v1.5
+//  VTP Tool – Kiểm Kê Tuyến Auto  v1.6
 //  Thực hiện 5 bước chọn tuyến → vào trang scan
 //  popup.js dùng tab.onUpdated để phát hiện khi trang scan mở.
 //
+//  Thay đổi v1.6:
+//    [⚡] SPEED: Bỏ các sleep cứng dư thừa — các bước phía sau đều đã có
+//        poll loop tự chờ phần tử, nên sleep upfront chỉ làm chậm:
+//        - Bỏ sleep(POPUP_WAIT) sau click dropdown (Bước 2 tự poll)
+//        - Bỏ sleep(DIALOG_WAIT) sau click Kiểm kê (Bước 5 tự poll)
+//        - sleep(STEP_DELAY) sau chọn tuyến → waitForLoadingDone (chờ AJAX
+//          settle, trả ngay khi không có loading)
+//        - Poll interval Bước 2 & 5: 300/200ms → 100ms
+//        → Tiết kiệm ~0.6-0.9s/tuyến, KHÔNG giảm độ tin cậy (poll vẫn chờ
+//          tối đa STEP_TIMEOUT).
+//
 //  Thay đổi v1.5:
 //    [⚡] SPEED: Giảm tất cả delay xuống mức tối thiểu an toàn
-//        - STEP_DELAY: 500 → 300ms  |  POPUP_WAIT: 800 → 400ms
-//        - DIALOG_WAIT: 1000 → 500ms  |  Loading poll: 300 → 150ms
 //    [+] Guard chống inject lại (__VTP_KIEMKE_RUNNING__)
 //    [+] Normalize NBSP + trim mạnh hơn
 // ============================================================
@@ -19,9 +28,8 @@ window.__VTP_KIEMKE_RUNNING__ = true;
     'use strict';
 
     const STEP_TIMEOUT = 12000; // [v1.5] Timeout chờ 1 element xuất hiện (giảm từ 15s)
-    const STEP_DELAY   = 300;   // [v1.5] Delay giữa các bước (giảm từ 500)
-    const POPUP_WAIT   = 400;   // [v1.5] Chờ dropdown mở (giảm từ 800)
-    const DIALOG_WAIT  = 500;   // [v1.5] Chờ dialog xuất hiện (giảm từ 1000)
+    // [v1.6] STEP_DELAY/POPUP_WAIT/DIALOG_WAIT đã được thay bằng poll loop +
+    // waitForLoadingDone nên không còn dùng. Giữ STEP_TIMEOUT làm trần chờ chung.
 
     const routeName = window.__VTP_SELECTED_ROUTE__;
     if (!routeName) {
@@ -90,7 +98,8 @@ window.__VTP_KIEMKE_RUNNING__ = true;
         const dropdownBtn = targetCombobox.querySelector('.z-combobox-button');
         if (!dropdownBtn) throw new Error('Không tìm thấy nút mở dropdown!');
         dropdownBtn.click();
-        await sleep(POPUP_WAIT);
+        // [v1.6] Bỏ sleep(POPUP_WAIT) cố định — Bước 2 đã có poll loop tự chờ
+        // popup xuất hiện (poll 100ms). Sleep upfront chỉ làm chậm vô ích.
 
         // ════ BƯỚC 2: Chọn tuyến trong dropdown ════
         notify(`Bước 2/5: Chọn tuyến "${routeName}"...`, 'info');
@@ -100,7 +109,7 @@ window.__VTP_KIEMKE_RUNNING__ = true;
             for (const p of document.querySelectorAll('.z-combobox-popup')) {
                 if (p.style.display !== 'none' && p.offsetHeight > 0) { dropdownPopup = p; break; }
             }
-            if (!dropdownPopup) await sleep(300);
+            if (!dropdownPopup) await sleep(100); // [v1.6] 300→100ms: phát hiện nhanh hơn
         }
         if (!dropdownPopup) throw new Error('Dropdown không mở được sau ' + STEP_TIMEOUT + 'ms!');
 
@@ -123,7 +132,9 @@ window.__VTP_KIEMKE_RUNNING__ = true;
         }
         if (!matched) throw new Error(`Không tìm thấy tuyến "${routeName}" trong dropdown!`);
         matched.click();
-        await sleep(STEP_DELAY);
+        // [v1.6] Sau chọn tuyến: chờ ZK xử lý onChange (loading nếu có) thay vì
+        // sleep cứng. waitForLoadingDone trả ngay khi không có loading.
+        await waitForLoadingDone(3000);
 
         // ════ BƯỚC 3: Click "Tìm kiếm" ════
         notify('Bước 3/5: Click "Tìm kiếm"...', 'info');
@@ -140,7 +151,8 @@ window.__VTP_KIEMKE_RUNNING__ = true;
         const kiemKeBtn = findButtonByText('Kiểm kê');
         if (!kiemKeBtn) throw new Error('Không tìm thấy nút "Kiểm kê"!');
         kiemKeBtn.click();
-        await sleep(DIALOG_WAIT);
+        // [v1.6] Bỏ sleep(DIALOG_WAIT) cố định — Bước 5 đã có poll loop tự chờ
+        // dialog "Chấp nhận" xuất hiện (poll 100ms).
 
         // ════ BƯỚC 5: Click "Chấp nhận" trong dialog ════
         notify('Bước 5/5: Click "Chấp nhận"...', 'info');
@@ -151,7 +163,7 @@ window.__VTP_KIEMKE_RUNNING__ = true;
                 const txt = normalizeText(btn.textContent);
                 if (txt === 'Chấp nhận' || txt === 'OK' || txt === 'ok') { acceptBtn = btn; break; }
             }
-            if (!acceptBtn) await sleep(200);
+            if (!acceptBtn) await sleep(100); // [v1.6] 200→100ms
         }
         if (!acceptBtn) throw new Error('Không tìm thấy nút "Chấp nhận" sau ' + STEP_TIMEOUT + 'ms!');
 

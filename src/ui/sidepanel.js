@@ -988,6 +988,64 @@ document.addEventListener('DOMContentLoaded', async () => {
     const routeElapsedEl        = document.getElementById('routeElapsedTime');     // Fix #7
     const routeEtaEl            = document.getElementById('routeEtaTime');         // Fix #7
 
+    // ════════════════════════════════════════
+    //  [Fix #44] LIVE LOG — Nhật ký thao tác Kiểm Kê Tuyến
+    //  Vòng lặp tuyến chạy ngay trong sidepanel → append thẳng vào DOM,
+    //  không cần qua storage như module Sửa Giờ.
+    // ════════════════════════════════════════
+    const routeLogCard  = document.getElementById('routeLogCard');
+    const routeLogBody  = document.getElementById('routeLogBody');
+    const routeLogClear = document.getElementById('routeLogClear');
+    const MAX_ROUTE_LOG = 250;
+
+    function escapeRouteLog(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /**
+     * Ghi 1 dòng nhật ký Kiểm Kê.
+     * @param {string|number} step  - nhãn bước (số hoặc icon)
+     * @param {string} text         - mô tả thao tác
+     * @param {string} [type]       - 'info' | 'success' | 'warning'
+     * @param {string} [route]      - tên tuyến (hiển thị dòng phụ)
+     */
+    function routeLog(step, text, type = 'info', route = '') {
+        if (!routeLogCard || !routeLogBody) return;
+        routeLogCard.style.display = 'block';
+
+        const typeClass = type === 'success' ? 'is-success'
+                        : type === 'warning' ? 'is-warning' : '';
+        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+        const routeLine = route
+            ? `<span class="livelog-bill">${escapeRouteLog(route)}</span>`
+            : '';
+
+        const item = document.createElement('div');
+        item.className = `livelog-item ${typeClass}`.trim();
+        item.innerHTML =
+            `<span class="livelog-step">${escapeRouteLog(step)}</span>` +
+            `<div class="livelog-main">` +
+                `<span class="livelog-text">${escapeRouteLog(text)}</span>` +
+                routeLine +
+            `</div>` +
+            `<span class="livelog-time">${escapeRouteLog(time)}</span>`;
+
+        routeLogBody.appendChild(item);
+        while (routeLogBody.children.length > MAX_ROUTE_LOG) {
+            routeLogBody.removeChild(routeLogBody.firstChild);
+        }
+        routeLogBody.scrollTop = routeLogBody.scrollHeight;
+    }
+
+    function clearRouteLog() {
+        if (routeLogBody) routeLogBody.innerHTML = '';
+        if (routeLogCard) routeLogCard.style.display = 'none';
+    }
+
+    if (routeLogClear) routeLogClear.addEventListener('click', clearRouteLog);
+
     let loadedRoutes = []; // Danh sách tuyến đã load
 
     // Fix #4 + #7: Visual status — lookup bằng data-index (an toàn hơn tên)
@@ -1296,9 +1354,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (routeElapsedEl) routeElapsedEl.textContent = '⏱ 00:00';
         if (routeEtaEl)     routeEtaEl.textContent     = '';
 
+        // [Fix #44] Dọn nhật ký phiên trước + log khởi động
+        clearRouteLog();
+        routeLog('▶', `Bắt đầu kiểm kê ${selectedRoutes.length} tuyến`, 'info');
+
         let completed  = 0;
         let errors     = [];
         let elapsedSec = 0;
+        let totalScanned = 0; // [Fix #45] tổng mã đã quét qua tất cả tuyến
 
         // Fix #7: ETA / elapsed timer
         const elapsedTimer = setInterval(() => {
@@ -1484,11 +1547,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Fix #1: Kiểm tra cancel trước mỗi tuyến
             if (cancelToken.cancelled) {
                 console.log('[VTP] ⏹ Hủy kiểm kê theo yêu cầu người dùng.');
+                routeLog('⏹', 'Đã dừng theo yêu cầu người dùng', 'warning');
                 break;
             }
 
             routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Kiểm kê: ${route}`;
             setRouteStatus(route, 'running'); // Fix #4
+            routeLog(`${i + 1}`, `Bắt đầu tuyến (${i + 1}/${selectedRoutes.length})`, 'info', route);
 
             try {
                 // A: Fix #2 — dùng mainTabId, không query theo active
@@ -1496,6 +1561,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // B: Chờ trang danh sách sẵn sàng (combobox phải xuất hiện)
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ trang danh sách sẵn sàng...`;
+                routeLog('⏳', 'Chờ trang danh sách sẵn sàng…', 'info', route);
                 const listReady = await waitForListPageReady(mainTabId, 45000);
                 if (!listReady) {
                     throw new Error('Trang danh sách không load được (timeout 45s). Vui lòng kiểm tra lại!');
@@ -1521,6 +1587,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // E: Đăng ký waitForScanPage TRƯỚC khi inject
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Thực hiện 5 bước: ${route}`;
+                routeLog('⚙', 'Thực hiện 5 bước chọn tuyến & tạo phiếu…', 'info', route);
                 const scanPagePromise = waitForScanPage(mainTabId, urlBefore, 90000);
 
                 // F: Inject kiemke_tuyen_auto (5 bước) + đánh dấu đã inject
@@ -1536,6 +1603,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // G: Chờ trang scan mở (URL change hoặc SPA input.clsinputpg)
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ trang kiểm kê mở...`;
+                routeLog('⏳', 'Chờ trang kiểm kê mở…', 'info', route);
                 const scanPageReady = await scanPagePromise;
                 if (!scanPageReady) {
                     throw new Error('Không vào được trang kiểm kê sau 90 giây');
@@ -1547,6 +1615,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // H: Inject gapton_core_scan
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
+                routeLog('📦', 'Đang quét mã kiểm tồn…', 'info', route);
                 console.log('[VTP] Inject gapton_core_scan.js...');
 
                 // [Fix #23] Dùng waitForTabReload thay vì chrome.storage signal
@@ -1574,9 +1643,34 @@ document.addEventListener('DOMContentLoaded', async () => {
                     console.warn('[VTP] Scan timeout tuyến:', route);
                     errors.push({ route, error: 'Scan timeout sau 11 phút' });
                     setRouteStatus(route, 'error');
+                    routeLog('❌', 'Quét timeout sau 11 phút', 'warning', route);
                 } else {
                     console.log('[VTP] ✅ Scan xong (tab đã reload):', route);
                     setRouteStatus(route, 'done');
+                    // [Fix #45] Đọc số mã đã quét từ localStorage (engine ghi trước reload)
+                    let scanInfo = null;
+                    try {
+                        const res = await chrome.scripting.executeScript({
+                            target: { tabId: mainTabId }, world: 'MAIN',
+                            func: () => {
+                                try {
+                                    const raw = localStorage.getItem('__VTP_LAST_SCAN_COUNT__');
+                                    localStorage.removeItem('__VTP_LAST_SCAN_COUNT__');
+                                    return raw ? JSON.parse(raw) : null;
+                                } catch (_) { return null; }
+                            }
+                        });
+                        scanInfo = res?.[0]?.result || null;
+                    } catch (_) {}
+                    if (scanInfo && typeof scanInfo.count === 'number') {
+                        totalScanned += scanInfo.count;
+                        const detail = scanInfo.empty
+                            ? 'Tuyến trống — không có mã cần quét'
+                            : `Đã quét ${scanInfo.count} mã`;
+                        routeLog('✅', detail, 'success', route);
+                    } else {
+                        routeLog('✅', 'Quét xong tuyến', 'success', route);
+                    }
                 }
 
                 // J: Tab đã tự reload sau scan → KHÔNG waitForTabReload thêm
@@ -1601,6 +1695,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error(`[VTP] Lỗi tuyến "${route}":`, e);
                 errors.push({ route, error: e.message });
                 setRouteStatus(route, 'error'); // Fix #4
+                routeLog('❌', `Lỗi: ${e.message}`, 'warning', route);
                 // Sau lỗi: thử reload để vòng tiếp theo có trạng thái sạch
                 try {
                     const reloadPromise = waitForTabReload(mainTabId, '', 20000);
@@ -1632,11 +1727,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (cancelToken.cancelled) {
             routeProgressStatus.textContent = `⏹ Đã dừng. Hoàn thành ${completed}/${selectedRoutes.length} tuyến.`;
+            routeLog('⏹', `Đã dừng — hoàn thành ${completed}/${selectedRoutes.length} tuyến`, 'warning');
         } else if (errors.length === 0) {
             routeProgressStatus.textContent = `✅ Hoàn tất! Đã kiểm kê ${completed} tuyến thành công.`;
+            routeLog('🎉', `Hoàn tất! ${completed} tuyến · tổng ${totalScanned} mã đã quét`, 'success');
         } else {
             routeProgressStatus.textContent =
                 `⚠️ Hoàn tất ${completed} tuyến. ${errors.length} lỗi: ${errors.map(e => e.route).join(', ')}`;
+            routeLog('⚠', `Hoàn tất ${completed} tuyến · tổng ${totalScanned} mã · ${errors.length} lỗi`, 'warning');
         }
 
         // Reset UI

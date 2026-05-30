@@ -361,6 +361,12 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         console.log('[VTP Core] TH2 –', msg);
         if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
 
+        // [Fix #45] Ghi số mã đã quét (=0) vào localStorage để sidepanel đọc.
+        // MAIN world không dùng được chrome.storage nên dùng localStorage page.
+        try {
+            localStorage.setItem('__VTP_LAST_SCAN_COUNT__', JSON.stringify({ count: 0, empty: true, ts: Date.now() }));
+        } catch (_) {}
+
         await new Promise(r => setTimeout(r, 200)); // [v2.0] Đợi trang ổn định (giảm từ 500ms)
         await clickHoanThanh();
 
@@ -745,6 +751,11 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         if (!clicked) {
             console.warn('[VTP Core] ⚠️ Không tìm thấy nút Hoàn thành');
         }
+
+        // [Fix #45] Ghi số mã đã quét vào localStorage để sidepanel đọc & log.
+        try {
+            localStorage.setItem('__VTP_LAST_SCAN_COUNT__', JSON.stringify({ count: processedCount, empty: false, ts: Date.now() }));
+        } catch (_) {}
 
         // Báo hiệu cho sidepanel → đợi 2s → F5
         // [v1.4] Dùng chrome.storage.local — tồn tại qua reload

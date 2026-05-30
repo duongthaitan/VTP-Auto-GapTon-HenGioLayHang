@@ -464,6 +464,22 @@
             <div id="routeProgressStatus" class="progress-status-text">Đang chuẩn bị...</div>
         </div>
 
+        <!-- [Fix #44] Nhật ký thao tác real-time — Kiểm Kê Tuyến -->
+        <div class="livelog-card" id="routeLogCard" style="display:none">
+            <div class="livelog-header">
+                <span class="livelog-title">
+                    <span class="live-dot"></span>
+                    Nhật ký thao tác
+                </span>
+                <button type="button" class="livelog-clear" id="routeLogClear" title="Xóa nhật ký">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" width="12" height="12">
+                        <path d="M2 4h12M5.5 4V2.5h5V4M6.5 7v4M9.5 7v4M3.5 4l.6 9a1 1 0 0 0 1 .9h5.8a1 1 0 0 0 1-.9l.6-9"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="livelog-body" id="routeLogBody"></div>
+        </div>
+
         <!-- ⬇ Sticky Action Bar — always visible at bottom of tab -->
         <div class="sticky-actions">
             <div class="action-primary-row">
