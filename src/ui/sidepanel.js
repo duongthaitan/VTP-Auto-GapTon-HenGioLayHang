@@ -514,6 +514,62 @@ document.addEventListener('DOMContentLoaded', async () => {
     const statusDot    = document.querySelector('#statusChinhGio .status-dot');
     const statusMsg    = document.querySelector('#statusChinhGio .status-text');
 
+    // ════════════════════════════════════════
+    //  [Fix #43] LIVE LOG — Nhật ký thao tác real-time
+    //  Content script ghi __VTP_CHINHGIO_LOG__ mỗi bước → render ở đây.
+    // ════════════════════════════════════════
+    const liveLogCard  = document.getElementById('liveLogCard');
+    const liveLogBody  = document.getElementById('liveLogBody');
+    const liveLogClear = document.getElementById('liveLogClear');
+    const MAX_LOG_ITEMS = 200;
+    let _lastLogKey = '';
+
+    function escapeLog(s) {
+        return String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function appendLiveLog(entry) {
+        if (!liveLogCard || !liveLogBody || !entry) return;
+        liveLogCard.style.display = 'block';
+
+        const typeClass = entry.type === 'success' ? 'is-success'
+                        : entry.type === 'warning' ? 'is-warning' : '';
+        const time = entry.ts
+            ? new Date(entry.ts).toLocaleTimeString('vi-VN', { hour12: false })
+            : '';
+        const billLine = (entry.index != null && entry.total != null)
+            ? `<span class="livelog-bill">Đơn ${entry.index + 1}/${entry.total} · ${escapeLog(entry.bill)}</span>`
+            : '';
+
+        const item = document.createElement('div');
+        item.className = `livelog-item ${typeClass}`.trim();
+        item.innerHTML =
+            `<span class="livelog-step">${escapeLog(entry.step)}</span>` +
+            `<div class="livelog-main">` +
+                `<span class="livelog-text">${escapeLog(entry.text)}</span>` +
+                billLine +
+            `</div>` +
+            `<span class="livelog-time">${escapeLog(time)}</span>`;
+
+        liveLogBody.appendChild(item);
+        while (liveLogBody.children.length > MAX_LOG_ITEMS) {
+            liveLogBody.removeChild(liveLogBody.firstChild);
+        }
+        // Auto-scroll xuống mục mới nhất
+        liveLogBody.scrollTop = liveLogBody.scrollHeight;
+    }
+
+    function clearLiveLog() {
+        if (liveLogBody) liveLogBody.innerHTML = '';
+        if (liveLogCard) liveLogCard.style.display = 'none';
+        _lastLogKey = '';
+        try { chrome.storage.local.remove('__VTP_CHINHGIO_LOG__'); } catch (_) {}
+    }
+
+    if (liveLogClear) liveLogClear.addEventListener('click', clearLiveLog);
+
     // [Fix #26] Hiển thị mã đơn đang chạy
     function setCurrentBill(bill) {
         if (!progressCurrent || !progressCurrentCode) return;
@@ -663,6 +719,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace !== 'local') return;
 
+        // [Fix #43] Nhật ký thao tác real-time
+        if (changes.__VTP_CHINHGIO_LOG__?.newValue) {
+            const entry = changes.__VTP_CHINHGIO_LOG__.newValue;
+            // Dedup bằng key (ts + seq) — ts luôn tăng giữa các đơn nên
+            // an toàn khi seq reset về 0 mỗi đơn mới.
+            const key = `${entry.ts}-${entry.seq}`;
+            if (key !== _lastLogKey) {
+                _lastLogKey = key;
+                appendLiveLog(entry);
+            }
+        }
+
         // Cập nhật tiến trình khi currentIndex thay đổi
         if (changes.currentIndex) {
             // Lấy giá trị mới nhất từ changes, không cần get() thêm
@@ -758,6 +826,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // [Fix #40] Ẩn báo cáo của phiên trước khi bắt đầu phiên mới
         if (reportCard) reportCard.style.display = 'none';
+
+        // [Fix #43] Dọn nhật ký thao tác của phiên trước
+        clearLiveLog();
 
         await chrome.storage.local.set({
             billList:     bills,

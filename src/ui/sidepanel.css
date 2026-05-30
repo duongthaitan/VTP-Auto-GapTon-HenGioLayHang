@@ -1833,3 +1833,120 @@ button:disabled {
     line-height: 1.4;
 }
 
+
+/* ─────────────────────────────────────────
+   [Fix #43] LIVE LOG — Nhật ký thao tác real-time
+───────────────────────────────────────── */
+.livelog-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--teal);
+    border-radius: var(--r-md);
+    box-shadow: var(--sh-sm);
+    overflow: hidden;
+    animation: slideUp 0.3s var(--ease);
+}
+.livelog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--gray-100);
+    background: linear-gradient(180deg, var(--gray-50) 0%, var(--white) 100%);
+}
+.livelog-title {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--tx-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+.livelog-clear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: var(--r-sm);
+    background: var(--gray-50);
+    border: 1px solid var(--border);
+    color: var(--tx-muted);
+    transition: all var(--fast);
+}
+.livelog-clear:hover {
+    background: var(--red-pale);
+    border-color: var(--red-border);
+    color: var(--red);
+}
+.livelog-body {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    background: var(--gray-50);
+}
+.livelog-body::-webkit-scrollbar { width: 4px; }
+.livelog-body::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 4px; }
+
+.livelog-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 6px 9px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    font-size: 11.5px;
+    line-height: 1.4;
+    animation: logItemIn 0.22s var(--ease);
+}
+@keyframes logItemIn {
+    from { opacity: 0; transform: translateX(-6px); }
+    to   { opacity: 1; transform: translateX(0); }
+}
+.livelog-step {
+    flex-shrink: 0;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-xs);
+    font-size: 10px;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+    background: var(--teal-pale);
+    color: var(--teal);
+    border: 1px solid var(--teal-border);
+}
+.livelog-main { flex: 1; min-width: 0; }
+.livelog-text {
+    color: var(--tx-primary);
+    font-weight: 500;
+    word-break: break-word;
+}
+.livelog-bill {
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10px;
+    color: var(--tx-muted);
+    margin-top: 1px;
+}
+.livelog-time {
+    flex-shrink: 0;
+    font-size: 9.5px;
+    color: var(--tx-muted);
+    font-variant-numeric: tabular-nums;
+    padding-top: 2px;
+}
+/* Variants theo type */
+.livelog-item.is-success .livelog-step { background: var(--green-bg); color: var(--green); border-color: var(--green-pale); }
+.livelog-item.is-warning .livelog-step { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-pale); }
+.livelog-item.is-warning { border-left: 2px solid var(--amber); }
+.livelog-item.is-success { border-left: 2px solid var(--green); }
