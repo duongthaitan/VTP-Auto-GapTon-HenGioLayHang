@@ -1625,6 +1625,15 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // → Tab reload chính là tín hiệu "quét xong" đáng tin cậy nhất
                 // PHẢI đăng ký TRƯỚC inject để không bỏ lỡ sự kiện reload
                 await clearScanComplete(); // dọn signal cũ (backward compat)
+                // [v2.1] Dọn count cũ trong localStorage TRƯỚC khi inject scan
+                // → đảm bảo giá trị đọc sau reload chắc chắn của tuyến hiện tại,
+                //   không nhầm count tuyến trước nếu engine không kịp ghi.
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: mainTabId }, world: 'MAIN',
+                        func: () => { try { localStorage.removeItem('__VTP_LAST_SCAN_COUNT__'); } catch (_) {} }
+                    });
+                } catch (_) {}
                 const scanCompleteViaReload = waitForTabReload(mainTabId, '', 660000); // 11 phút
 
                 await chrome.scripting.executeScript({

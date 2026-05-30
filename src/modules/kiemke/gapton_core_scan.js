@@ -612,13 +612,18 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         // Khởi tạo tổng mã trang mới
         if (totalOnPage === 0) totalOnPage = allCodesOnPage.length;
 
-        // Tìm mã đầu tiên chưa quét — O(n) worst case
+        // [v2.1 perf] Tìm mã chưa quét + đếm remaining trong CÙNG 1 vòng duyệt.
+        // Trước đây gọi getValidCodes() rồi filter() 2 lần riêng → O(n) thừa
+        // mỗi iteration (nặng với trang nhiều mã). Gộp lại còn 1 lượt duyệt.
         let target = null;
+        let remaining = 0;
         for (const item of allCodesOnPage) {
-            if (!processedCodeSet.has(item.code)) { target = item; break; }
+            if (!processedCodeSet.has(item.code)) {
+                remaining++;
+                if (!target) target = item;
+            }
         }
 
-        const remaining      = target ? allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length : 0;
         const processedOnPage = totalOnPage - remaining;
         updateProgress(processedOnPage, totalOnPage);
 
@@ -714,8 +719,10 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         if (isStopped) break;
 
         // Cập nhật UI sau khi quét xong 1 mã
+        // [v2.1 perf] Đã quét thêm 1 mã trên trang này → processedOnPage + 1.
+        // Tránh filter() lại toàn bộ allCodesOnPage (O(n) thừa mỗi mã).
         const timeScanned = new Date().toLocaleTimeString();
-        const totalDone   = totalOnPage - allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length;
+        const totalDone   = Math.min(processedOnPage + 1, totalOnPage);
         updateProgress(totalDone, totalOnPage);
 
         if (!isSuccess) {
