@@ -820,6 +820,57 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const mainTabId = tab.id;
 
+        // [Fix #50] Tự điều hướng đến trang Quản lý vận đơn trước khi chạy.
+        // Nếu tab hiện tại KHÔNG ở trang quan-ly-van-don → chuyển đến đó rồi
+        // chờ load xong. Tránh inject sai trang (nguyên nhân fail hàng loạt).
+        const TARGET_URL = 'https://viettelpost.vn/quan-ly-van-don';
+        const isOnOrderPage = (u) => /viettelpost\.vn\/quan-ly-van-don/i.test(u || '');
+
+        // Helper: chờ tab load xong (status complete) tới đúng trang đích
+        const waitForTabComplete = (tabId, urlKeyword, timeoutMs = 45000) =>
+            new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve(false);
+                }, timeoutMs);
+                const listener = (tid, changeInfo, updated) => {
+                    if (tid !== tabId || changeInfo.status !== 'complete') return;
+                    if (!urlKeyword || (updated.url || '').includes(urlKeyword)) {
+                        clearTimeout(timer);
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve(true);
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+            });
+
+        if (!isOnOrderPage(tab.url)) {
+            startChinhGioBtn.disabled  = true;
+            startChinhGioBtn.innerHTML = BTN_HTML.startRunning;
+            if (statusMsg) statusMsg.textContent      = 'Đang chuyển đến trang Quản lý vận đơn…';
+            if (statusDot) statusDot.style.background = '#f59e0b';
+
+            const navDone = waitForTabComplete(mainTabId, 'quan-ly-van-don', 45000);
+            try {
+                await chrome.tabs.update(mainTabId, { url: TARGET_URL });
+            } catch (e) {
+                alert('Không thể mở trang Quản lý vận đơn: ' + e.message);
+                startChinhGioBtn.disabled  = false;
+                startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
+                return;
+            }
+            const navOk = await navDone;
+            if (!navOk) {
+                alert('Trang Quản lý vận đơn tải quá lâu. Vui lòng thử lại!');
+                startChinhGioBtn.disabled  = false;
+                startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
+                if (statusMsg) statusMsg.textContent = 'Đã dừng.';
+                return;
+            }
+            // SPA Angular cần thêm thời gian render form danh sách sau 'complete'
+            await new Promise(r => setTimeout(r, 1500));
+        }
+
         // Disable UI
         startChinhGioBtn.disabled  = true;
         startChinhGioBtn.innerHTML = BTN_HTML.startRunning;

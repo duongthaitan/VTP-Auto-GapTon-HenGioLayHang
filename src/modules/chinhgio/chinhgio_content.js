@@ -61,6 +61,47 @@
 //          form đóng giữ 15s — phòng AJAX trả chậm ở tab background.
 //        • Sau click "Cập nhật": coi là THÀNH CÔNG nếu form đóng HOẶC có toast
 //          thành công; không còn phụ thuộc DUY NHẤT vào form đóng.
+//    [Fix #46] SỬA LỖI click ngày/giờ KHÔNG ăn (DOM Angular thật):
+//        • Trigger là <button class="select-down"><span>Chọn thời gian</span></button>
+//          → findChonThoiGian trả về <button> (Angular gắn handler trên button),
+//          không click span lá nữa.
+//        • Các <label for$="_apt"> / label.lb-time LUÔN có sẵn trong DOM kể cả
+//          khi panel ẩn → chờ theo "đang HIỂN THỊ" (offsetParent), không theo
+//          "tồn tại". Trước đây resolve ngay → click khi option còn ẩn → trượt.
+//        • selectOption(): click thẳng <input> liên kết (getElementById vì id
+//          "1_apt" bắt đầu bằng số) + dispatch input/change cho Angular reactive,
+//          rồi click cả <label> → chắc chắn radio được chọn.
+//        • Lọc dayLabels/labelCaNgay theo isVisible() để không bắt option ẩn.
+//    [Fix #47] SỬA TIẾP "chọn không ăn" — id radio TRÙNG giữa các đơn:
+//        • Angular render mỗi đơn/panel bộ radio cùng id (1_apt, 1_op) →
+//          getElementById trả phần tử ĐẦU TIÊN (panel ẩn của đơn khác) → click
+//          sai chỗ. findAssociatedInput() tìm input THEO NGỮ CẢNH label
+//          (sibling trước → parent → li), không dùng id global.
+//        • fireClick(): phát đủ chuỗi pointerdown/mousedown/mouseup/click cho
+//          zone.js bắt; verify input.checked, chưa được thì click lại.
+//        • Log chẩn đoán: liệt kê option ngày & khung giờ hiển thị + trạng thái
+//          checked → nếu vẫn lỗi, Console sẽ cho biết chính xác nguyên nhân.
+//    [Fix #48] ĐÚNG CẤU TRÚC THẬT (theo ảnh giao diện): popup chọn thời gian
+//        gồm 2 TAB ngày ("Ngày mai" | "Ngày kia") ở đầu, MỖI TAB có 1 danh
+//        sách khung giờ riêng ("Tối"/"Cả ngày"/"Sáng"/"Chiều"):
+//        • Trình tự: mở trigger → CLICK tab "Ngày kia" → CHỜ danh sách giờ của
+//          tab cập nhật (waitForAjaxCycle + buffer) → CLICK "Cả ngày" hiển thị.
+//        • isVisible() viết lại dùng getClientRects()+computed style (offsetParent
+//          không đáng tin trong popup position:absolute → từng tóm nhầm option
+//          của tab ẩn).
+//        • findDayTab(): tìm tab ngày theo text khi không có label[for$="_apt"].
+//        • selectOption(): set input.checked=true + native click + chuỗi chuột.
+//    [Fix #49] DOM ĐẦY ĐỦ xác nhận: popup là <div.dropdown-menu> (display:none
+//        khi đóng) chứa <ul.tab-header> 2 radio NGÀY input[name="day"] (id *_apt)
+//        và <ul.tab-list> radio KHUNG GIỜ input[name="time"] (id *_op).
+//        • LỖI GỐC: lọc theo isVisible() — popup display:none → label 0 client
+//          rect → bị loại sạch → không tìm thấy ngày/giờ → skip. BỎ lọc visible.
+//        • pickRadioByText(groupName, wantList): chọn radio THẲNG theo
+//          input[name=...], map text qua label[for=id]; set checked=true +
+//          native click + click label + dispatch change → Angular nhận, KHÔNG
+//          phụ thuộc CSS hiển thị. Chờ radio TỒN TẠI (không cần hiển thị).
+//        • Trình tự: trigger → input[name="day"]("Ngày kia") → chờ AJAX khung
+//          giờ → input[name="time"]("Cả ngày"). Verify .checked + log từng radio.
 // ============================================================
 
 if (window.__VTP_CHINHGIO_RUNNING__) {
@@ -282,30 +323,218 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
     /**
      * [Fix #41] Tìm trigger "Chọn thời gian" trên form sửa đơn.
-     * DOM thật: <span class="d-block ng-star-inserted">Chọn thời gian</span>
-     * → tìm phần tử LÁ (không có element con) có text "chọn thời gian".
-     * Trả về phần tử click được (span hoặc cha gần nhất là button/a/div clickable).
+     * DOM thật: <button class="form-control select-down"><span>Chọn thời gian</span></button>
+     * [Fix #46] Trả về <button> CLICK ĐƯỢC (không phải span lá) — Angular gắn
+     * handler trên button, click span đôi khi không mở dropdown.
+     * Ưu tiên: button.select-down → button chứa text → button cha của span text.
      */
     const findChonThoiGian = () => {
-        const nodes = Array.from(document.querySelectorAll('span, button, a, div'));
+        // Ưu tiên 1: button.select-down (DOM thật)
+        const directBtn = document.querySelector('button.select-down');
+        if (directBtn) return directBtn;
+        // Ưu tiên 2: button có text "chọn thời gian"
+        const btns = Array.from(document.querySelectorAll('button'));
+        for (const b of btns) {
+            if (normTextG(b.innerText || b.textContent) === 'chọn thời gian') return b;
+        }
+        // Ưu tiên 3: phần tử lá text "chọn thời gian" → lấy button cha nếu có
+        const nodes = Array.from(document.querySelectorAll('span, a, div'));
         for (const el of nodes) {
-            if (el.children.length > 0) continue; // chỉ lấy phần tử lá
+            if (el.children.length > 0) continue;
             if (normTextG(el.innerText || el.textContent) === 'chọn thời gian') {
-                return el;
+                return el.closest('button') || el;
             }
         }
         // Fallback: khớp chứa cụm (phòng có ký tự ẩn)
         for (const el of nodes) {
             if (el.children.length > 0) continue;
             if (normTextG(el.innerText || el.textContent).includes('chọn thời gian')) {
-                return el;
+                return el.closest('button') || el;
             }
         }
         return null;
     };
 
-    /** [Fix #41] Panel chọn ngày đã render? (radio name="day" + label[for$="_apt"]) */
-    const isDayPanelOpen = () => !!document.querySelector('label[for$="_apt"]');
+    /**
+     * [Fix #46][Fix #48] Một phần tử có đang HIỂN THỊ (interactive) không.
+     * Dùng getClientRects().length (đáng tin hơn offsetParent trong popup
+     * position:fixed/absolute — offsetParent có thể null dù phần tử vẫn hiện)
+     * kết hợp computed display/visibility.
+     */
+    const isVisible = (el) => {
+        if (!el) return false;
+        if (el.getClientRects().length === 0) return false;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+        return true;
+    };
+
+    /**
+     * [Fix #49] Lấy popup chọn thời gian ĐANG MỞ.
+     * DOM thật: <div class="dropdown-menu show"> chứa ul.tab-header (2 tab ngày)
+     * và ul.tab-list (danh sách khung giờ). Mọi truy vấn ngày/giờ PHẢI scope
+     * vào đây để tránh bắt nhầm radio TRÙNG ID của đơn/popup khác trong trang.
+     */
+    const getOpenDropdown = () => {
+        const menus = Array.from(document.querySelectorAll('.dropdown-menu.show, .dropdown-menu'));
+        // Ưu tiên menu có .tab-header + .tab-list và đang hiển thị
+        for (const m of menus) {
+            if (m.querySelector('.tab-header') && m.querySelector('.tab-list') && isVisible(m)) {
+                return m;
+            }
+        }
+        // Fallback: menu hiển thị có input[name="day"] hoặc input[name="time"]
+        for (const m of menus) {
+            if (isVisible(m) && (m.querySelector('input[name="day"]') || m.querySelector('input[name="time"]'))) {
+                return m;
+            }
+        }
+        return null;
+    };
+
+    /**
+     * [Fix #49] Tìm <input> radio theo TEXT của label, SCOPE trong 1 container.
+     * Click thẳng input (Angular RadioControlValueAccessor lắng nghe trên input),
+     * tránh hoàn toàn bẫy <label for> + id trùng toàn cục.
+     * @param scope     container (dropdown đang mở)
+     * @param nameAttr  'day' | 'time'
+     * @param wantNorm  text đã normalize cần khớp (vd 'ngày kia', 'cả ngày')
+     */
+    const findRadioByLabelText = (scope, nameAttr, wantNorm) => {
+        if (!scope) return null;
+        const items = Array.from(scope.querySelectorAll(`input[name="${nameAttr}"]`));
+        for (const input of items) {
+            // label đi kèm: sibling sau input, hoặc trong cùng <li>
+            let label = input.nextElementSibling;
+            if (!label || label.tagName !== 'LABEL') {
+                label = input.closest('li')?.querySelector('label') || null;
+            }
+            const txt = normTextG(label ? (label.innerText || label.textContent) : '');
+            if (txt === wantNorm || txt.includes(wantNorm)) {
+                return { input, label, text: (label?.innerText || '').trim() };
+            }
+        }
+        return null;
+    };
+
+    /**
+     * [Fix #48] Tìm tab ngày ("Ngày mai"/"Ngày kia") theo text và click để
+     * kích hoạt. DOM thật: popup có 2 tab ở đầu, mỗi tab 1 danh sách khung giờ.
+     * Trả về phần tử tab nếu tìm thấy.
+     */
+    const findDayTab = (wantNorm) => {
+        // Tab thường là <a>/<li>/<div> chứa text ngày, KHÔNG phải label[for]
+        const nodes = Array.from(document.querySelectorAll('a, li, div, span, button'));
+        return nodes.find(el =>
+            el.children.length <= 1 &&
+            isVisible(el) &&
+            normTextG(el.innerText || el.textContent) === wantNorm
+        ) || null;
+    };
+
+    /**
+     * [Fix #47] Tìm <input> liên kết với label THEO NGỮ CẢNH (cùng cụm),
+     * KHÔNG dùng getElementById global.
+     * Lý do: Angular render mỗi đơn/panel một bộ radio TRÙNG id (1_apt, 1_op…)
+     * → getElementById trả phần tử ĐẦU TIÊN trong trang (có thể là panel ẩn của
+     * đơn khác) → click không tác động panel đang mở.
+     * Ưu tiên tìm input gần label nhất: sibling trước → trong parent → trong li.
+     */
+    const findAssociatedInput = (label) => {
+        if (!label) return null;
+        // 1. input đứng ngay trước label (DOM: <input id><label for>)
+        let prev = label.previousElementSibling;
+        if (prev && prev.tagName === 'INPUT') return prev;
+        // 2. input trong cùng parent
+        let input = label.parentElement?.querySelector('input[type="radio"], input');
+        if (input) return input;
+        // 3. input trong <li> cha
+        const li = label.closest('li, .form-group, div');
+        if (li) {
+            input = li.querySelector('input[type="radio"], input');
+            if (input) return input;
+        }
+        // 4. fallback cuối: getElementById (chấp nhận id bắt đầu bằng số)
+        const forId = label.getAttribute('for');
+        if (forId) return document.getElementById(forId);
+        return null;
+    };
+
+    /**
+     * [Fix #46][Fix #47] Chọn 1 option ngày/giờ một cách CHẮC CHẮN cho Angular.
+     * - Tìm input theo ngữ cảnh label (findAssociatedInput) → tránh id trùng.
+     * - Phát đủ chuỗi sự kiện chuột (pointerdown/mousedown/mouseup/click) trên
+     *   CẢ input lẫn label — Angular (zone.js) đôi khi chỉ nhận đúng chuỗi này.
+     * - Verify input.checked; chưa checked thì click lại label 1 lần.
+     * Trả về input (để caller verify) hoặc null.
+     */
+    const fireClick = (el) => {
+        if (!el) return;
+        try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (_) {}
+        for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) {
+            try {
+                el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+            } catch (_) { /* pointerdown có thể không hỗ trợ → bỏ qua */ }
+        }
+    };
+
+    const selectOption = (label) => {
+        if (!label) return null;
+        try { label.scrollIntoView({ block: 'nearest' }); } catch (_) {}
+        const input = findAssociatedInput(label);
+        // 1) Ưu tiên thao tác trên input THEO NGỮ CẢNH (tránh id trùng):
+        //    set checked + native .click() (đảm bảo Angular nhận 'change').
+        if (input) {
+            try {
+                if ('checked' in input) input.checked = true;
+                input.click(); // native click → trình duyệt tự fire change
+            } catch (_) {}
+            input.dispatchEvent(new Event('input',  { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // 2) Native click trên label (cho tab/handler lắng nghe click trên label)
+        try { label.click(); } catch (_) {}
+        // 3) Chuỗi sự kiện chuột đầy đủ trên label (cho zone.js)
+        fireClick(label);
+        return input;
+    };
+
+    /**
+     * [Fix #49] Chọn 1 radio (đã có sẵn input + label từ findRadioByLabelText).
+     * Thao tác trực tiếp trên INPUT — đây là phần tử Angular thực sự lắng nghe.
+     * Set checked + native click + dispatch change, rồi click label dự phòng,
+     * cuối cùng verify input.checked. Trả về true nếu đã chọn được.
+     */
+    const selectRadio = (entry) => {
+        if (!entry || !entry.input) return false;
+        const { input, label } = entry;
+        try { (label || input).scrollIntoView({ block: 'nearest' }); } catch (_) {}
+        try {
+            input.checked = true;
+            input.click();
+            input.dispatchEvent(new Event('input',  { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (_) {}
+        // Dự phòng: chuỗi chuột trên label (một số UI bắt click ở label)
+        if (label) fireClick(label);
+        // Verify
+        if ('checked' in input && !input.checked) {
+            try { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
+        }
+        return ('checked' in input) ? input.checked : true;
+    };
+
+    /**
+     * [Fix #46] Panel chọn ngày đã MỞ & HIỂN THỊ chưa?
+     * Các <label for$="_apt"> luôn nằm sẵn trong DOM kể cả khi panel ẩn,
+     * nên phải kiểm tra offsetParent (hiển thị) — không chỉ tồn tại.
+     */
+    const isDayPanelOpen = () =>
+        Array.from(document.querySelectorAll('label[for$="_apt"]')).some(isVisible);
+
+    /** [Fix #46] Có label khung giờ ("Cả ngày"…) đang hiển thị chưa? */
+    const isTimePanelOpen = () =>
+        Array.from(document.querySelectorAll('label.lb-time')).some(isVisible);
 
     /**
      * [Fix #41] Form sửa giờ có đang mở không? Dùng thay cho
@@ -313,8 +542,7 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
      * Coi là "mở" nếu thấy trigger "Chọn thời gian" HOẶC panel ngày HOẶC khung giờ.
      */
     const isEditTimeFormOpen = () =>
-        !!findChonThoiGian() || isDayPanelOpen() ||
-        !!document.querySelector('label.lb-time');
+        !!findChonThoiGian() || isDayPanelOpen() || isTimePanelOpen();
 
     /**
      * [Mới v2.0] Tự động đóng modal / dialog đang mở.
@@ -548,75 +776,101 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             } else {
                 // ═════════════════════════════════════
                 // BƯỚC 5: Thao tác chọn giờ
+                //   [Fix #48] Cấu trúc THẬT (theo ảnh): popup có 2 TAB ngày
+                //   ("Ngày mai" | "Ngày kia") ở đầu; mỗi tab có 1 danh sách
+                //   khung giờ riêng ("Tối", "Cả ngày", "Sáng", "Chiều").
+                //   Trình tự đúng: mở trigger → CLICK tab "Ngày kia" → CHỜ danh
+                //   sách giờ của tab đó cập nhật → CLICK "Cả ngày" (đang hiển thị).
                 // ═════════════════════════════════════
-                reportStep(5, 'Mở bảng chọn thời gian');
-                // [Fix #41] Click trigger "Chọn thời gian". Nếu panel ngày
-                // chưa render sau click (vd cần click phần tử cha), thử click
-                // phần tử cha clickable rồi chờ lại.
-                // [Fix #42] panel ngày timeout 4s→8s phòng AJAX chậm.
-                timeSelectBtn.click();
-                let dayReady = await waitForElementBy(
-                    () => document.querySelector('label[for$="_apt"]'),
-                    8000
-                );
-                if (!dayReady && timeSelectBtn.parentElement) {
-                    console.log('[VTP Sửa Giờ] Panel ngày chưa mở, thử click phần tử cha...');
-                    timeSelectBtn.parentElement.click();
-                    dayReady = await waitForElementBy(
-                        () => document.querySelector('label[for$="_apt"]'),
-                        8000
-                    );
-                }
-
-                // [Fix #42] Mạng chậm: panel ngày có thể chưa về sau 2 lần thử
-                // → KHÔNG đoán mò click. Skip đơn an toàn (chưa thao tác gì
-                // nguy hiểm, chỉ mới mở form).
-                if (!dayReady) {
-                    console.warn('[VTP Sửa Giờ] Panel chọn ngày không tải được (mạng chậm)');
-                    await closeOpenForms();
-                    shouldSkip = true;
-                    skipReason = 'Không tải được danh sách ngày (mạng chậm)';
-                }
-
-                // [Fix #34] Chọn ngày theo TEXT, KHÔNG theo id.
-                // DOM thật cho thấy id (1_apt/2_apt) ĐỘNG theo các option còn
-                // khả dụng — vd label[for="1_apt"] có thể là "Ngày kia". Chọn
-                // theo id như code cũ → đặt NHẦM ngày hàng loạt.
-                // Ưu tiên: Ngày kia → Ngày mai → Hôm nay; fallback option đầu.
                 const norm = (s) => (s || '')
                     .replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+
+                reportStep(5, 'Mở bảng chọn thời gian');
+                // [Fix #49] DOM THẬT (đầy đủ): trigger <button.select-down> mở
+                // <div.dropdown-menu> chứa:
+                //   <ul.tab-header>: 2 radio NGÀY  → input[name="day"] (id *_apt)
+                //   <ul.tab-list>  : radio KHUNG GIỜ → input[name="time"] (id *_op)
+                // Cả hai luôn có trong DOM. KHÔNG lọc theo isVisible (popup
+                // display:none → mọi label 0 rect → lọc nhầm sạch → đó là lý do
+                // trước đây skip). Thao tác THẲNG trên radio input: set checked
+                // + dispatch change → Angular reactive form nhận, bất kể CSS.
+                timeSelectBtn.click();
+                await sleep(120);
+
+                // Helper: chọn 1 radio theo text label, trong nhóm name chỉ định.
+                const pickRadioByText = (groupName, wantList) => {
+                    const inputs = Array.from(document.querySelectorAll(`input[name="${groupName}"]`));
+                    const entry = (inp) => {
+                        let txt = '';
+                        if (inp.id) {
+                            const lb = document.querySelector(`label[for="${CSS.escape(inp.id)}"]`);
+                            if (lb) txt = lb.innerText || lb.textContent || '';
+                        }
+                        if (!txt) {
+                            const lb = inp.parentElement?.querySelector('label');
+                            if (lb) txt = lb.innerText || lb.textContent || '';
+                        }
+                        return norm(txt);
+                    };
+                    const all = inputs.map(inp => ({ inp, txt: entry(inp) }));
+                    console.log(`[VTP Sửa Giờ] Radio[name=${groupName}]:`,
+                        all.map(e => `${e.inp.id}="${e.txt}"`).join(' | ') || '(rỗng)');
+                    let picked = null;
+                    for (const want of wantList) {
+                        const found = all.find(e => e.txt.includes(want));
+                        if (found) { picked = found; break; }
+                    }
+                    if (!picked && all.length) picked = all[0]; // fallback option đầu
+                    if (!picked) return { ok: false, picked: null, label: null };
+
+                    const inp = picked.inp;
+                    const lbl = inp.id ? document.querySelector(`label[for="${CSS.escape(inp.id)}"]`) : null;
+                    try { if ('checked' in inp) inp.checked = true; } catch (_) {}
+                    try { inp.click(); } catch (_) {}      // native → browser fire change
+                    if (lbl) { try { lbl.click(); } catch (_) {} fireClick(lbl); }
+                    inp.dispatchEvent(new Event('input',  { bubbles: true }));
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    return { ok: ('checked' in inp ? inp.checked : true), picked: inp, label: picked.txt };
+                };
+
+                // Chờ radio ngày xuất hiện trong DOM (không cần "hiển thị")
+                const dayReady = await waitForElementBy(
+                    () => (document.querySelector('input[name="day"]') ? true : null),
+                    15000
+                );
+                if (!dayReady) {
+                    console.warn('[VTP Sửa Giờ] Không thấy radio ngày (input[name="day"])');
+                    await closeOpenForms();
+                    shouldSkip = true;
+                    skipReason = 'Không tải được danh sách ngày';
+                }
+
+                // ── 5a: Chọn NGÀY (Ngày kia → Ngày mai → Hôm nay) ──
                 if (!shouldSkip) {
-                    const dayLabels = Array.from(document.querySelectorAll('label[for$="_apt"]'));
-                    let chosenDay = null;
-                    for (const want of ['ngày kia', 'ngày mai', 'hôm nay']) {
-                        const lbl = dayLabels.find(l => norm(l.innerText).includes(want));
-                        if (lbl) { lbl.click(); chosenDay = lbl.innerText.trim(); break; }
-                    }
-                    if (!chosenDay && dayLabels.length) {
-                        dayLabels[0].click();
-                        chosenDay = dayLabels[0].innerText.trim();
-                    }
-                    console.log('[VTP Sửa Giờ] Chọn ngày:', chosenDay || '(không thấy option ngày)');
-                    reportStep(5, `Chọn ngày: ${chosenDay || '(không rõ)'}`);
+                    const dayRes = pickRadioByText('day', ['ngày kia', 'ngày mai', 'hôm nay']);
+                    console.log('[VTP Sửa Giờ] Chọn ngày:', dayRes.label || '(không thấy)', '| checked =', dayRes.ok);
+                    reportStep(5, `Chọn ngày: ${dayRes.label || '(không rõ)'}`);
 
-                    // [Fix #35] Sau khi chọn ngày, danh sách KHUNG GIỜ có thể nạp
-                    // qua AJAX. Chờ trọn chu kỳ loading (nếu có) trước khi tìm
-                    // "Cả ngày" — nếu không, mạng chậm sẽ làm waitForElementBy hết
-                    // giờ → bỏ sót "Cả ngày" nhưng vẫn bấm Cập nhật (cập nhật thiếu).
-                    // appearMs ngắn (1500ms): không có AJAX thì trả false ngay,
-                    // không làm chậm trường hợp khung giờ render đồng bộ.
-                    await waitForAjaxCycle(1500, 15000);
+                    // ── 5b: Chờ danh sách KHUNG GIỜ cập nhật theo ngày vừa chọn ──
+                    await waitForAjaxCycle(1200, 15000);
+                    await sleep(250);
 
-                    // [Fix #24] Chờ "Cả ngày" render thay vì sleep cố định
-                    // [Fix #35] 4s→8s. [Fix #42] 8s→12s phòng khung giờ về chậm.
-                    const labelCaNgay = await waitForElementBy(
-                        () => Array.from(document.querySelectorAll('label.lb-time'))
-                                   .find(lbl => norm(lbl.innerText).includes('cả ngày')),
+                    // ── 5c: Chọn "Cả ngày" ──
+                    const timeReady = await waitForElementBy(
+                        () => (document.querySelector('input[name="time"]') ? true : null),
                         12000
                     );
-                    if (labelCaNgay) {
-                        labelCaNgay.click();
-                        reportStep(5, 'Chọn khung giờ "Cả ngày"');
+                    if (timeReady) {
+                        const timeRes = pickRadioByText('time', ['cả ngày']);
+                        if (timeRes.label && timeRes.label.includes('cả ngày')) {
+                            console.log('[VTP Sửa Giờ] Chọn "Cả ngày" | checked =', timeRes.ok);
+                            reportStep(5, 'Chọn khung giờ "Cả ngày"');
+                        } else {
+                            console.warn('[VTP Sửa Giờ] Không thấy đúng "Cả ngày", chỉ có:', timeRes.label);
+                            await closeOpenForms();
+                            shouldSkip = true;
+                            skipReason = 'Không tải được khung giờ "Cả ngày"';
+                        }
                     } else {
                         // [Fix #35] Không tìm thấy "Cả ngày" → KHÔNG bấm Cập nhật mù,
                         // skip đơn để tránh cập nhật thiếu khung giờ.
