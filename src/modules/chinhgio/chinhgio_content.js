@@ -110,6 +110,17 @@
 //        ngay (radio luôn có trong DOM) và sleep(120) quá ngắn để Angular mở
 //        dropdown. FIX: dùng getOpenDropdown() scope, findRadioByLabelText()
 //        trong scope, selectRadio() + fireClick(trigger) + fireClick(li cha).
+//    [Fix #52] SỬA LỖI GỐC CHỌN NGÀY/GIỜ KHÔNG ĂN — Angular không nhận:
+//        • selectRadio() cũ set input.checked=true TRƯỚC input.click() →
+//          browser thấy radio đã checked → KHÔNG fire native 'change' event
+//          → Angular RadioControlValueAccessor không bắt → form model giữ
+//          giá trị mặc định (hôm nay). FIX: click LABEL trước (giống user
+//          thật), browser tự toggle radio + fire native change, Angular
+//          zone.js intercept → form model cập nhật. Set checked chỉ fallback.
+//        • Bỏ checked radio cùng nhóm trước khi click → đảm bảo change fires.
+//        • Tăng wait sau chọn ngày (500ms) cho Angular render lại khung giờ.
+//        • Verify + retry: kiểm tra input.checked sau mỗi lần chọn.
+//        • Bỏ 'hôm nay' khỏi dayWants — luôn chọn ngày tương lai.
 // ============================================================
 
 if (window.__VTP_CHINHGIO_RUNNING__) {
@@ -123,6 +134,25 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
     /** Độ trễ tĩnh */
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    /**
+     * [Fix #53] Poll nhanh đến khi predicate trả true.
+     * Thay thế sleep() cứng — tự thích ứng theo tốc độ thực tế:
+     * interval nhỏ → phát hiện nhanh, timeout đủ lớn → không miss mạng chậm.
+     * Mạng nhanh: resolve trong 30-60ms. Mạng chậm: chờ tối đa timeout.
+     * @returns {Promise<boolean>} true nếu predicate thỏa, false nếu timeout
+     */
+    const pollUntil = (predicate, { interval = 30, timeout = 1000 } = {}) =>
+        new Promise(resolve => {
+            if (predicate()) return resolve(true);
+            const start = Date.now();
+            const timer = setInterval(() => {
+                if (predicate() || Date.now() - start >= timeout) {
+                    clearInterval(timer);
+                    resolve(predicate());
+                }
+            }, interval);
+        });
 
     /**
      * Chờ phần tử DOM xuất hiện (MutationObserver + timeout).
@@ -262,11 +292,12 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
         '.fa-spinner.fa-spin', 'i.fa-spin', '[class*="loading"]'
     ].join(', ');
 
+    /** [Fix #53] Cache 1 lần getComputedStyle thay vì gọi 2 lần mỗi mutation */
     const isLoadingVisible = () => {
         const el = document.querySelector(LOADING_SELECTORS);
-        return !!(el && el.offsetParent !== null &&
-            getComputedStyle(el).display !== 'none' &&
-            getComputedStyle(el).visibility !== 'hidden');
+        if (!el || el.offsetParent === null) return false;
+        const cs = getComputedStyle(el);
+        return cs.display !== 'none' && cs.visibility !== 'hidden';
     };
 
     /**
@@ -298,6 +329,60 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             if (!appeared) return false;
             // Pha 2: chờ loading biến mất (timeout vẫn coi như xong để không treo)
             return watch(() => !isLoadingVisible(), goneMs).then(() => true);
+        });
+    };
+
+    /**
+     * [Fix #53] waitForAjaxCycle nâng cấp — tự thích ứng tốc độ mạng.
+     * Cải tiến so với V1:
+     *   1. FAST PATH: nếu loading ĐÃ đang hiện → nhảy thẳng sang chờ biến mất
+     *   2. Content-check song song: nếu DOM thay đổi trước khi loading hiện
+     *      (mạng cực nhanh) → resolve sớm thay vì chờ hết appearMs
+     *   3. appearMs giảm mặc định (2000 thay vì 4000) vì có content-check bù
+     */
+    const waitForAjaxCycleV2 = async ({ appearMs = 2000, goneMs = 15000, contentCheck = null } = {}) => {
+        const watch = (predicate, timeout) => new Promise((resolve) => {
+            if (predicate()) return resolve(true);
+            let tid = null;
+            const obs = new MutationObserver(() => {
+                if (predicate()) { obs.disconnect(); clearTimeout(tid); resolve(true); }
+            });
+            obs.observe(document.body, {
+                childList: true, subtree: true,
+                attributes: true, attributeFilter: ['style', 'class']
+            });
+            tid = setTimeout(() => { obs.disconnect(); resolve(false); }, timeout);
+        });
+
+        // FAST PATH: loading ĐÃ đang hiển thị → chờ nó biến mất
+        if (isLoadingVisible()) {
+            await watch(() => !isLoadingVisible(), goneMs);
+            return true;
+        }
+
+        // Song song: loading spinner HOẶC content thay đổi
+        return new Promise(resolve => {
+            let done = false;
+            const finish = (val) => { if (!done) { done = true; resolve(val); } };
+
+            // Tín hiệu 1: Loading spinner cycle cổ điển
+            watch(isLoadingVisible, appearMs).then(appeared => {
+                if (done) return;
+                if (appeared) {
+                    watch(() => !isLoadingVisible(), goneMs).then(() => finish(true));
+                } else {
+                    finish(false);
+                }
+            });
+
+            // Tín hiệu 2: Content đã thay đổi (mạng nhanh, không có spinner)
+            if (contentCheck) {
+                const poll = setInterval(() => {
+                    if (done) { clearInterval(poll); return; }
+                    if (contentCheck()) { clearInterval(poll); finish(true); }
+                }, 80);
+                setTimeout(() => clearInterval(poll), appearMs + goneMs);
+            }
         });
     };
 
@@ -508,28 +593,91 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
     };
 
     /**
-     * [Fix #49] Chọn 1 radio (đã có sẵn input + label từ findRadioByLabelText).
-     * Thao tác trực tiếp trên INPUT — đây là phần tử Angular thực sự lắng nghe.
-     * Set checked + native click + dispatch change, rồi click label dự phòng,
-     * cuối cùng verify input.checked. Trả về true nếu đã chọn được.
+     * [Fix #52] Chọn 1 radio cho Angular — CLICK LABEL TRƯỚC (giống user thật).
+     *
+     * LỖI CŨ: set input.checked=true TRƯỚC input.click() → trình duyệt thấy
+     * radio đã checked → KHÔNG fire native 'change' event → Angular's
+     * RadioControlValueAccessor không bắt được → form model giữ giá trị cũ
+     * → server nhận ngày hôm nay thay vì ngày được chọn.
+     *
+     * FIX: Click label trước (browser tự toggle radio + fire change natively)
+     * → Angular zone.js bắt event → form model cập nhật.
+     * Chỉ set checked=true + dispatch change làm FALLBACK nếu click không ăn.
      */
     const selectRadio = (entry) => {
         if (!entry || !entry.input) return false;
         const { input, label } = entry;
         try { (label || input).scrollIntoView({ block: 'nearest' }); } catch (_) {}
-        try {
-            input.checked = true;
+
+        // Bước 1: Bỏ checked trên tất cả radio cùng nhóm (simulate user behavior)
+        // → đảm bảo click tiếp theo sẽ thay đổi trạng thái và fire 'change'
+        const groupName = input.getAttribute('name');
+        if (groupName) {
+            const scope = input.closest('.dropdown-menu') || input.closest('.p-3') || document;
+            scope.querySelectorAll(`input[name="${groupName}"]`).forEach(r => {
+                if (r !== input && r.checked) r.checked = false;
+            });
+        }
+
+        // Bước 2: Click LABEL trước (giống user thật) — browser sẽ:
+        //   a) Set input.checked = true
+        //   b) Fire native 'change' event
+        //   c) Angular zone.js intercept → change detection → form model update
+        if (label) {
+            label.click();                // native click
+            fireClick(label);             // full mouse event sequence cho zone.js
+        }
+
+        // Bước 3: Click INPUT trực tiếp (dự phòng nếu label click không ăn)
+        if (!input.checked) {
             input.click();
+            fireClick(input);
+        }
+
+        // Bước 4: Fallback cuối — set checked bằng tay + dispatch events
+        if (!input.checked) {
+            console.warn('[VTP Sửa Giờ] Radio chưa checked sau click, force set...');
+            input.checked = true;
             input.dispatchEvent(new Event('input',  { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (_) {}
-        // Dự phòng: chuỗi chuột trên label (một số UI bắt click ở label)
-        if (label) fireClick(label);
-        // Verify
-        if ('checked' in input && !input.checked) {
-            try { input.checked = true; input.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) {}
         }
-        return ('checked' in input) ? input.checked : true;
+
+        // Bước 5: Click <li> cha dự phòng (Angular component có thể lắng nghe ở li)
+        const li = input.closest('li');
+        if (li) fireClick(li);
+
+        console.log(`[VTP Sửa Giờ] selectRadio: id=${input.id} checked=${input.checked} text="${(label?.innerText || '').trim()}"`);
+        return input.checked;
+    };
+
+    /**
+     * [Fix #53] Chọn radio + verify với retry adaptive.
+     * Gộp 3 khối sleep(500)+retry thủ công ở Bước 5a/5c thành 1 hàm.
+     * Thay sleep(500) cứng bằng pollUntil(30ms) → phát hiện checked ngay.
+     * @returns {Promise<boolean>} true nếu radio đã checked
+     */
+    const selectRadioWithRetry = async (entry, maxAttempts = 3) => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (attempt <= 2) {
+                selectRadio(entry);
+            } else {
+                // Force: set checked + dispatch events
+                entry.input.checked = true;
+                entry.input.dispatchEvent(new Event('change', { bubbles: true }));
+                if (entry.label) { entry.label.click(); fireClick(entry.label); }
+            }
+            // Poll nhanh thay vì sleep cứng — resolve ngay khi checked
+            const ok = await pollUntil(
+                () => entry.input.checked,
+                { interval: 30, timeout: attempt === 1 ? 600 : 1000 }
+            );
+            if (ok) {
+                console.log(`[VTP Sửa Giờ] Radio checked OK (lần ${attempt})`);
+                return true;
+            }
+            console.warn(`[VTP Sửa Giờ] Radio chưa checked sau lần ${attempt}`);
+        }
+        return entry.input.checked;
     };
 
     /**
@@ -654,6 +802,8 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
         const totalBills  = data.billList.length;
         const index       = data.currentIndex;
 
+        // [Fix #53] Bắt đầu đo thời gian để trả về sidepanel cho adaptive delay
+        const _perfStart = Date.now();
         console.log(`>>> Đang xử lý (${index + 1}/${totalBills}): ${currentBill}`);
 
         let shouldSkip  = false;
@@ -729,13 +879,19 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                 console.warn('[VTP Sửa Giờ] Không thấy nút search, dùng fallback Enter.');
             }
 
-            // [Fix #33][Fix #42] Chờ TRỌN chu kỳ AJAX search (loading hiện → ẩn)
-            // để chắc chắn bảng kết quả là của ĐƠN MỚI, không phải bảng cũ còn
-            // sót. Mạng chậm: chu kỳ này có thể nhiều giây — đó chính là lúc
-            // trước đây tool thao tác nhầm trên kết quả cũ. appearMs nới rộng
-            // 2500→4000ms để bắt được loading về muộn khi mạng kém.
+            // [Fix #33][Fix #42][Fix #53] Chờ TRỌN chu kỳ AJAX search.
+            // V2: song song kiểm tra content thay đổi (bảng kết quả đổi nội dung)
+            // → mạng nhanh không cần chờ hết appearMs. Giảm 4000→2000ms.
             reportStep(2, 'Chờ server trả kết quả tìm kiếm…');
-            await waitForAjaxCycle(4000, 20000);
+            const _oldResultHtml = document.querySelector('.vtp-list-bill, .bill-result-table, table')?.innerHTML || '';
+            await waitForAjaxCycleV2({
+                appearMs: 2000,
+                goneMs: 20000,
+                contentCheck: () => {
+                    const cur = document.querySelector('.vtp-list-bill, .bill-result-table, table')?.innerHTML || '';
+                    return cur !== _oldResultHtml && cur.length > 0;
+                }
+            });
 
             // ═══════════════════════════════════════════
             // BƯỚC 3: Mở menu Sửa đơn
@@ -809,18 +965,16 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                 //      chọn radio đúng cách (selectRadio) + click <li> cha dự phòng.
 
                 // 5.0: Click trigger + chờ dropdown MỞ
+                // [Fix #53] Bỏ sleep(500) cứng → waitForElementBy đã dùng
+                // MutationObserver, sẽ resolve ngay khi dropdown mở.
                 timeSelectBtn.click();
-                fireClick(timeSelectBtn); // backup: full mouse event sequence cho zone.js
-                await sleep(300); // đợi dropdown bắt đầu mở (CSS transition)
+                fireClick(timeSelectBtn);
 
-                // Chờ dropdown thực sự hiển thị (getOpenDropdown trả non-null)
-                let dropdown = await waitForElementBy(() => getOpenDropdown(), 5000);
+                let dropdown = await waitForElementBy(() => getOpenDropdown(), 10000);
                 if (!dropdown) {
-                    // Retry: click lại trigger với full event chain
-                    console.warn('[VTP Sửa Giờ] Dropdown chưa mở sau 5s, retry click trigger...');
+                    console.warn('[VTP Sửa Giờ] Dropdown chưa mở sau 10s, retry click trigger...');
                     fireClick(timeSelectBtn);
-                    await sleep(500);
-                    dropdown = getOpenDropdown();
+                    dropdown = await waitForElementBy(() => getOpenDropdown(), 5000);
                 }
 
                 // Scope cho tìm kiếm radio — ưu tiên dropdown, fallback document
@@ -829,16 +983,16 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     console.warn('[VTP Sửa Giờ] Không tìm thấy dropdown.show, fallback search toàn document');
                 }
 
-                // Chờ radio ngày xuất hiện TRONG SCOPE (không chỉ tồn tại global)
+                // [Fix #52b] Chờ radio ngày trong SCOPE — tăng 10s→20s cho mạng chậm
                 const dayReady = await waitForElementBy(
                     () => radioScope.querySelector('input[name="day"]'),
-                    10000
+                    20000
                 );
                 if (!dayReady) {
-                    console.warn('[VTP Sửa Giờ] Không thấy radio ngày trong dropdown');
+                    console.warn('[VTP Sửa Giờ] Không thấy radio ngày trong dropdown (20s timeout)');
                     await closeOpenForms();
                     shouldSkip = true;
-                    skipReason = 'Không tải được danh sách ngày';
+                    skipReason = 'Không tải được danh sách ngày (mạng chậm?)';
                 }
 
                 // ── 5a: Chọn NGÀY (Ngày kia → Ngày mai → Hôm nay) ──
@@ -854,8 +1008,9 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                             return `${inp.id}="${normTextG(lbl?.innerText || '')}" checked=${inp.checked}`;
                         }).join(' | ') || '(rỗng)');
 
-                    // Tìm radio "Ngày kia" TRONG scope (ưu tiên), fallback "Ngày mai"/"Hôm nay"
-                    const dayWants = ['ngày kia', 'ngày mai', 'hôm nay'];
+                    // [Fix #52] Tìm radio "Ngày kia" TRONG scope (ưu tiên), fallback "Ngày mai".
+                    // KHÔNG bao gồm 'hôm nay' — luôn chọn ngày tương lai.
+                    const dayWants = ['ngày kia', 'ngày mai'];
                     let dayEntry = null;
                     for (const want of dayWants) {
                         dayEntry = findRadioByLabelText(radioScope, 'day', want);
@@ -863,13 +1018,17 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     }
 
                     if (dayEntry) {
-                        // Chọn radio bằng selectRadio (set checked + click + dispatch + verify)
-                        const dayOk = selectRadio(dayEntry);
-                        // Backup: click cả <li> cha (Angular tab component lắng nghe click ở li)
-                        const dayLi = dayEntry.input.closest('li');
-                        if (dayLi) fireClick(dayLi);
-                        console.log('[VTP Sửa Giờ] Chọn ngày:', dayEntry.text, '| checked =', dayOk);
+                        // [Fix #53] Dùng selectRadioWithRetry — gộp 3 khối
+                        // sleep(500)+retry thủ công thành 1 hàm adaptive.
+                        // pollUntil(30ms) thay sleep(500) → tiết kiệm ~1.3s/đơn.
                         reportStep(5, `Chọn ngày: ${dayEntry.text || '(không rõ)'}`);
+                        const dayOk = await selectRadioWithRetry(dayEntry);
+                        if (!dayOk) {
+                            console.warn('[VTP Sửa Giờ] Không thể chọn ngày sau 3 lần');
+                            await closeOpenForms();
+                            shouldSkip = true;
+                            skipReason = 'Không thể chọn ngày (radio không phản hồi)';
+                        }
                     } else {
                         console.warn('[VTP Sửa Giờ] Không tìm thấy radio ngày nào phù hợp');
                         await closeOpenForms();
@@ -879,15 +1038,35 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                 }
 
                 // ── 5b: Chờ danh sách KHUNG GIỜ cập nhật theo ngày vừa chọn ──
+                // [Fix #53] Bỏ sleep(500)+sleep(300) cứng, dùng waitForAjaxCycleV2
+                // với content-check song song. Tiết kiệm ~5.8s trên mạng nhanh.
                 if (!shouldSkip) {
-                    await waitForAjaxCycle(1500, 15000);
-                    await sleep(300);
-
-                    // Refresh dropdown ref (có thể DOM đã thay đổi sau AJAX)
+                    // Refresh dropdown ref (có thể DOM đã thay đổi sau chọn ngày)
                     const freshDropdown = getOpenDropdown() || radioScope;
 
+                    // V2: song song chờ loading spinner VÀ kiểm tra radio time
+                    // xuất hiện → mạng nhanh resolve ngay khi radio có mặt.
+                    await waitForAjaxCycleV2({
+                        appearMs: 2000,
+                        goneMs: 30000,
+                        contentCheck: () => !!freshDropdown.querySelector('input[name="time"]')
+                    });
+
+                    // Chờ radio time xuất hiện (MutationObserver, tối đa 20s)
+                    const timeRadioReady = await waitForElementBy(
+                        () => freshDropdown.querySelector('input[name="time"]'),
+                        20000
+                    );
+                    if (!timeRadioReady) {
+                        console.warn('[VTP Sửa Giờ] Radio time không xuất hiện sau 20s');
+                        await closeOpenForms();
+                        shouldSkip = true;
+                        skipReason = 'Không tải được khung giờ (mạng chậm?)';
+                    }
+
                     // ── 5c: Chọn "Cả ngày" ──
-                    // Log toàn bộ radio giờ để chẩn đoán
+                    if (!shouldSkip) {
+                    // Log radio giờ để chẩn đoán
                     const allTimeInputs = Array.from(freshDropdown.querySelectorAll('input[name="time"]'));
                     console.log(`[VTP Sửa Giờ] Radio[name=time] trong scope:`,
                         allTimeInputs.map(inp => {
@@ -900,20 +1079,22 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
                     const timeEntry = findRadioByLabelText(freshDropdown, 'time', 'cả ngày');
                     if (timeEntry) {
-                        const timeOk = selectRadio(timeEntry);
-                        // Backup: click <li> cha
-                        const timeLi = timeEntry.input.closest('li');
-                        if (timeLi) fireClick(timeLi);
-                        console.log('[VTP Sửa Giờ] Chọn "Cả ngày" | checked =', timeOk);
+                        // [Fix #53] Dùng selectRadioWithRetry — tiết kiệm ~1s/đơn
                         reportStep(5, 'Chọn khung giờ "Cả ngày"');
+                        const timeOk = await selectRadioWithRetry(timeEntry);
+                        if (!timeOk) {
+                            console.warn('[VTP Sửa Giờ] Không thể chọn "Cả ngày" sau 3 lần');
+                            await closeOpenForms();
+                            shouldSkip = true;
+                            skipReason = 'Không thể chọn khung giờ (radio không phản hồi)';
+                        }
                     } else {
-                        // [Fix #35] Không tìm thấy "Cả ngày" → KHÔNG bấm Cập nhật mù,
-                        // skip đơn để tránh cập nhật thiếu khung giờ.
                         console.warn('[VTP Sửa Giờ] Không tìm thấy khung giờ "Cả ngày" trong dropdown');
                         await closeOpenForms();
                         shouldSkip = true;
                         skipReason = 'Không tải được khung giờ "Cả ngày"';
                     }
+                    } // đóng if (!shouldSkip) sau waitForElementBy time
                 }
 
                 // ═════════════════════════════════════
@@ -932,7 +1113,7 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                         if (!btn) btn = btns.find(b => normTextG(b.innerText || b.textContent).includes('cập nhật'));
                         return btn || null;
                     };
-                    const updateBtn = await waitForElementBy(findUpdateBtn, 5000);
+                    const updateBtn = await waitForElementBy(findUpdateBtn, 10000); // [Fix #52b] 5s→10s
                     if (updateBtn) {
                         updateBtn.click();
                     } else {
@@ -951,9 +1132,10 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     // [Fix #42] Form đóng = cập nhật thành công. Nếu sau 15s form
                     // CHƯA đóng (mạng rất chậm) → buộc đóng và CẢNH BÁO, nhưng
                     // KHÔNG coi là thất bại vì lệnh Cập nhật đã được gửi.
-                    const formClosed = await waitForGoneBy(isEditTimeFormOpen, 15000);
+                    // [Fix #52b] Tăng 15s→30s cho mạng chậm
+                    const formClosed = await waitForGoneBy(isEditTimeFormOpen, 30000);
                     if (!formClosed) {
-                        console.warn('[VTP Sửa Giờ] Form chưa đóng sau 15s (mạng chậm), buộc đóng...');
+                        console.warn('[VTP Sửa Giờ] Form chưa đóng sau 30s (mạng chậm), buộc đóng...');
                         await closeOpenForms();
                     }
                     reportStep(6, 'Đã cập nhật xong', 'success');
@@ -986,10 +1168,14 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
             await chrome.storage.local.set({ currentIndex: latestData.currentIndex + 1 });
         }
 
+        // [Fix #53] Trả durationMs để sidepanel tính adaptive delay
+        const _perfDuration = Date.now() - _perfStart;
+        console.log(`[VTP Sửa Giờ] Thời gian xử lý đơn: ${_perfDuration}ms`);
         return {
-            status: shouldSkip ? 'skipped' : 'success',
-            bill:   currentBill,
-            reason: skipReason
+            status:     shouldSkip ? 'skipped' : 'success',
+            bill:       currentBill,
+            reason:     skipReason,
+            durationMs: _perfDuration
         };
     }
 

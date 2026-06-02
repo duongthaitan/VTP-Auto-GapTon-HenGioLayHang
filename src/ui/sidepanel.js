@@ -891,7 +891,24 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // ── Vòng lặp chính — chạy ở sidepanel (KHÔNG bị throttle) ──
         const skipList = [];
-        const successList = []; // [Fix #40] thu thập mã đơn thành công để báo cáo
+        const successList = [];
+
+        // [Fix #53] Adaptive delay — theo dõi thời gian thực mỗi đơn
+        // để tự điều chỉnh delay giữa các đơn thay vì sleep cứng 4s.
+        const _billDurations = []; // ms mỗi đơn gần nhất
+        const MAX_DURATION_SAMPLES = 10; // sliding window
+        const computeAdaptiveGap = () => {
+            if (_billDurations.length < 2) return 1500; // Mặc định ban đầu
+            const avg = _billDurations.reduce((a, b) => a + b, 0) / _billDurations.length;
+            // Mạng rất nhanh (< 5s/đơn): gap 300ms đủ
+            if (avg < 5000)  return 300;
+            // Mạng nhanh (5-10s): gap 500ms
+            if (avg < 10000) return 500;
+            // Mạng trung bình (10-20s): gap 800ms
+            if (avg < 20000) return 800;
+            // Mạng chậm (> 20s): gap 1500ms
+            return 1500;
+        };
 
         // [Fix #24] Helper: inject + chờ kết quả 1 đơn, có retry khi 'busy'/'timeout'
         async function runOneBillWithRetry(bill, maxAttempts = 2) {
@@ -972,18 +989,33 @@ document.addEventListener('DOMContentLoaded', async () => {
                     }
                 }
             } else if (result.status === 'success') {
-                // [Fix #40] Thu thập đơn thành công để báo cáo cuối phiên
                 successList.push(result.bill || bills[i]);
+            }
+
+            // [Fix #53] Thu thập durationMs cho adaptive delay
+            if (typeof result.durationMs === 'number' && result.durationMs > 0) {
+                _billDurations.push(result.durationMs);
+                if (_billDurations.length > MAX_DURATION_SAMPLES) _billDurations.shift();
             }
 
             // Cập nhật progress
             updateProgressUI(i + 1, bills.length);
 
-            // [Fix #27] Delay giữa các đơn — dùng giá trị user cài (giây).
-            // Mặc định 4s; min 0.3s để page kịp render. Trước đây delayMs
-            // được dùng làm sleep tĩnh trước Tầng 2 — đã bỏ ở Fix #25.
+            // [Fix #53] Adaptive delay giữa các đơn — tự điều chỉnh theo tốc độ mạng.
+            // Mạng nhanh: ~300ms. Mạng chậm: ~1500ms. User có thể override.
+            // Nếu user chỉnh delay > 2s → tôn trọng giá trị user (ưu tiên an toàn).
             if (i < bills.length - 1) {
-                const gapMs = Math.max(300, ((parseInt(delayInput.value, 10) || 4) * 1000));
+                const userDelay = parseInt(delayInput.value, 10) || 4;
+                let gapMs;
+                if (userDelay > 2) {
+                    // User đặt delay cao → tôn trọng (có thể cố tình chậm để tránh rate-limit)
+                    gapMs = userDelay * 1000;
+                } else {
+                    // User để mặc định hoặc đặt thấp → dùng adaptive
+                    gapMs = computeAdaptiveGap();
+                }
+                gapMs = Math.max(200, gapMs);
+                console.log(`[VTP Sửa Giờ] Delay giữa đơn: ${gapMs}ms (avg=${Math.round((_billDurations.reduce((a,b)=>a+b,0)||0)/(_billDurations.length||1))}ms, samples=${_billDurations.length})`);
                 await new Promise(r => setTimeout(r, gapMs));
             }
         }
