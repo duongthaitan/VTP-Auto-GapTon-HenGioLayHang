@@ -102,6 +102,14 @@
 //          phụ thuộc CSS hiển thị. Chờ radio TỒN TẠI (không cần hiển thị).
 //        • Trình tự: trigger → input[name="day"]("Ngày kia") → chờ AJAX khung
 //          giờ → input[name="time"]("Cả ngày"). Verify .checked + log từng radio.
+//    [Fix #51] SỬA LỖI CLICK NGÀY/GIỜ KHÔNG ĂN — các hàm scoped đã viết
+//        (getOpenDropdown, findRadioByLabelText, selectRadio) nhưng KHÔNG ĐƯỢC
+//        GỌI trong BƯỚC 5. Thay vào đó dùng pickRadioByText local tìm TOÀN CỤC
+//        (document.querySelectorAll) → bắt nhầm radio đơn/panel khác → click
+//        không tác dụng. Ngoài ra waitForElementBy(input[name="day"]) resolve
+//        ngay (radio luôn có trong DOM) và sleep(120) quá ngắn để Angular mở
+//        dropdown. FIX: dùng getOpenDropdown() scope, findRadioByLabelText()
+//        trong scope, selectRadio() + fireClick(trigger) + fireClick(li cha).
 // ============================================================
 
 if (window.__VTP_CHINHGIO_RUNNING__) {
@@ -786,60 +794,48 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
                     .replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 
                 reportStep(5, 'Mở bảng chọn thời gian');
-                // [Fix #49] DOM THẬT (đầy đủ): trigger <button.select-down> mở
-                // <div.dropdown-menu> chứa:
-                //   <ul.tab-header>: 2 radio NGÀY  → input[name="day"] (id *_apt)
-                //   <ul.tab-list>  : radio KHUNG GIỜ → input[name="time"] (id *_op)
-                // Cả hai luôn có trong DOM. KHÔNG lọc theo isVisible (popup
-                // display:none → mọi label 0 rect → lọc nhầm sạch → đó là lý do
-                // trước đây skip). Thao tác THẲNG trên radio input: set checked
-                // + dispatch change → Angular reactive form nhận, bất kể CSS.
+                // [Fix #51] VIẾT LẠI BƯỚC 5: Sử dụng các hàm scoped đã có sẵn
+                // (getOpenDropdown, findRadioByLabelText, selectRadio) thay vì
+                // pickRadioByText local tìm TOÀN CỤC (document.querySelectorAll).
+                //
+                // LỖI CŨ (pickRadioByText):
+                //   1. Tìm input[name="day"] GLOBAL → bắt nhầm radio đơn/panel khác
+                //   2. Chờ input TỒN TẠI (luôn true, vì radio có sẵn trong DOM kể
+                //      cả khi dropdown display:none) → không đợi dropdown thực sự mở
+                //   3. sleep(120) quá ngắn → Angular chưa kịp khởi tạo bindings
+                //
+                // FIX: Click trigger → chờ dropdown HIỂN THỊ (getOpenDropdown) →
+                //      tìm radio TRONG dropdown (findRadioByLabelText) →
+                //      chọn radio đúng cách (selectRadio) + click <li> cha dự phòng.
+
+                // 5.0: Click trigger + chờ dropdown MỞ
                 timeSelectBtn.click();
-                await sleep(120);
+                fireClick(timeSelectBtn); // backup: full mouse event sequence cho zone.js
+                await sleep(300); // đợi dropdown bắt đầu mở (CSS transition)
 
-                // Helper: chọn 1 radio theo text label, trong nhóm name chỉ định.
-                const pickRadioByText = (groupName, wantList) => {
-                    const inputs = Array.from(document.querySelectorAll(`input[name="${groupName}"]`));
-                    const entry = (inp) => {
-                        let txt = '';
-                        if (inp.id) {
-                            const lb = document.querySelector(`label[for="${CSS.escape(inp.id)}"]`);
-                            if (lb) txt = lb.innerText || lb.textContent || '';
-                        }
-                        if (!txt) {
-                            const lb = inp.parentElement?.querySelector('label');
-                            if (lb) txt = lb.innerText || lb.textContent || '';
-                        }
-                        return norm(txt);
-                    };
-                    const all = inputs.map(inp => ({ inp, txt: entry(inp) }));
-                    console.log(`[VTP Sửa Giờ] Radio[name=${groupName}]:`,
-                        all.map(e => `${e.inp.id}="${e.txt}"`).join(' | ') || '(rỗng)');
-                    let picked = null;
-                    for (const want of wantList) {
-                        const found = all.find(e => e.txt.includes(want));
-                        if (found) { picked = found; break; }
-                    }
-                    if (!picked && all.length) picked = all[0]; // fallback option đầu
-                    if (!picked) return { ok: false, picked: null, label: null };
+                // Chờ dropdown thực sự hiển thị (getOpenDropdown trả non-null)
+                let dropdown = await waitForElementBy(() => getOpenDropdown(), 5000);
+                if (!dropdown) {
+                    // Retry: click lại trigger với full event chain
+                    console.warn('[VTP Sửa Giờ] Dropdown chưa mở sau 5s, retry click trigger...');
+                    fireClick(timeSelectBtn);
+                    await sleep(500);
+                    dropdown = getOpenDropdown();
+                }
 
-                    const inp = picked.inp;
-                    const lbl = inp.id ? document.querySelector(`label[for="${CSS.escape(inp.id)}"]`) : null;
-                    try { if ('checked' in inp) inp.checked = true; } catch (_) {}
-                    try { inp.click(); } catch (_) {}      // native → browser fire change
-                    if (lbl) { try { lbl.click(); } catch (_) {} fireClick(lbl); }
-                    inp.dispatchEvent(new Event('input',  { bubbles: true }));
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    return { ok: ('checked' in inp ? inp.checked : true), picked: inp, label: picked.txt };
-                };
+                // Scope cho tìm kiếm radio — ưu tiên dropdown, fallback document
+                const radioScope = dropdown || document;
+                if (!dropdown) {
+                    console.warn('[VTP Sửa Giờ] Không tìm thấy dropdown.show, fallback search toàn document');
+                }
 
-                // Chờ radio ngày xuất hiện trong DOM (không cần "hiển thị")
+                // Chờ radio ngày xuất hiện TRONG SCOPE (không chỉ tồn tại global)
                 const dayReady = await waitForElementBy(
-                    () => (document.querySelector('input[name="day"]') ? true : null),
-                    15000
+                    () => radioScope.querySelector('input[name="day"]'),
+                    10000
                 );
                 if (!dayReady) {
-                    console.warn('[VTP Sửa Giờ] Không thấy radio ngày (input[name="day"])');
+                    console.warn('[VTP Sửa Giờ] Không thấy radio ngày trong dropdown');
                     await closeOpenForms();
                     shouldSkip = true;
                     skipReason = 'Không tải được danh sách ngày';
@@ -847,34 +843,73 @@ if (window.__VTP_CHINHGIO_RUNNING__) {
 
                 // ── 5a: Chọn NGÀY (Ngày kia → Ngày mai → Hôm nay) ──
                 if (!shouldSkip) {
-                    const dayRes = pickRadioByText('day', ['ngày kia', 'ngày mai', 'hôm nay']);
-                    console.log('[VTP Sửa Giờ] Chọn ngày:', dayRes.label || '(không thấy)', '| checked =', dayRes.ok);
-                    reportStep(5, `Chọn ngày: ${dayRes.label || '(không rõ)'}`);
+                    // Log toàn bộ radio ngày trong scope để chẩn đoán
+                    const allDayInputs = Array.from(radioScope.querySelectorAll('input[name="day"]'));
+                    console.log(`[VTP Sửa Giờ] Radio[name=day] trong scope (${dropdown ? 'dropdown' : 'document'}):`,
+                        allDayInputs.map(inp => {
+                            const li = inp.closest('li');
+                            const lbl = inp.nextElementSibling?.tagName === 'LABEL'
+                                ? inp.nextElementSibling
+                                : (li?.querySelector('label') || null);
+                            return `${inp.id}="${normTextG(lbl?.innerText || '')}" checked=${inp.checked}`;
+                        }).join(' | ') || '(rỗng)');
 
-                    // ── 5b: Chờ danh sách KHUNG GIỜ cập nhật theo ngày vừa chọn ──
-                    await waitForAjaxCycle(1200, 15000);
-                    await sleep(250);
+                    // Tìm radio "Ngày kia" TRONG scope (ưu tiên), fallback "Ngày mai"/"Hôm nay"
+                    const dayWants = ['ngày kia', 'ngày mai', 'hôm nay'];
+                    let dayEntry = null;
+                    for (const want of dayWants) {
+                        dayEntry = findRadioByLabelText(radioScope, 'day', want);
+                        if (dayEntry) break;
+                    }
+
+                    if (dayEntry) {
+                        // Chọn radio bằng selectRadio (set checked + click + dispatch + verify)
+                        const dayOk = selectRadio(dayEntry);
+                        // Backup: click cả <li> cha (Angular tab component lắng nghe click ở li)
+                        const dayLi = dayEntry.input.closest('li');
+                        if (dayLi) fireClick(dayLi);
+                        console.log('[VTP Sửa Giờ] Chọn ngày:', dayEntry.text, '| checked =', dayOk);
+                        reportStep(5, `Chọn ngày: ${dayEntry.text || '(không rõ)'}`);
+                    } else {
+                        console.warn('[VTP Sửa Giờ] Không tìm thấy radio ngày nào phù hợp');
+                        await closeOpenForms();
+                        shouldSkip = true;
+                        skipReason = 'Không tìm thấy tùy chọn ngày (Ngày kia/Ngày mai)';
+                    }
+                }
+
+                // ── 5b: Chờ danh sách KHUNG GIỜ cập nhật theo ngày vừa chọn ──
+                if (!shouldSkip) {
+                    await waitForAjaxCycle(1500, 15000);
+                    await sleep(300);
+
+                    // Refresh dropdown ref (có thể DOM đã thay đổi sau AJAX)
+                    const freshDropdown = getOpenDropdown() || radioScope;
 
                     // ── 5c: Chọn "Cả ngày" ──
-                    const timeReady = await waitForElementBy(
-                        () => (document.querySelector('input[name="time"]') ? true : null),
-                        12000
-                    );
-                    if (timeReady) {
-                        const timeRes = pickRadioByText('time', ['cả ngày']);
-                        if (timeRes.label && timeRes.label.includes('cả ngày')) {
-                            console.log('[VTP Sửa Giờ] Chọn "Cả ngày" | checked =', timeRes.ok);
-                            reportStep(5, 'Chọn khung giờ "Cả ngày"');
-                        } else {
-                            console.warn('[VTP Sửa Giờ] Không thấy đúng "Cả ngày", chỉ có:', timeRes.label);
-                            await closeOpenForms();
-                            shouldSkip = true;
-                            skipReason = 'Không tải được khung giờ "Cả ngày"';
-                        }
+                    // Log toàn bộ radio giờ để chẩn đoán
+                    const allTimeInputs = Array.from(freshDropdown.querySelectorAll('input[name="time"]'));
+                    console.log(`[VTP Sửa Giờ] Radio[name=time] trong scope:`,
+                        allTimeInputs.map(inp => {
+                            const li = inp.closest('li');
+                            const lbl = inp.nextElementSibling?.tagName === 'LABEL'
+                                ? inp.nextElementSibling
+                                : (li?.querySelector('label') || null);
+                            return `${inp.id}="${normTextG(lbl?.innerText || '')}" checked=${inp.checked}`;
+                        }).join(' | ') || '(rỗng)');
+
+                    const timeEntry = findRadioByLabelText(freshDropdown, 'time', 'cả ngày');
+                    if (timeEntry) {
+                        const timeOk = selectRadio(timeEntry);
+                        // Backup: click <li> cha
+                        const timeLi = timeEntry.input.closest('li');
+                        if (timeLi) fireClick(timeLi);
+                        console.log('[VTP Sửa Giờ] Chọn "Cả ngày" | checked =', timeOk);
+                        reportStep(5, 'Chọn khung giờ "Cả ngày"');
                     } else {
                         // [Fix #35] Không tìm thấy "Cả ngày" → KHÔNG bấm Cập nhật mù,
                         // skip đơn để tránh cập nhật thiếu khung giờ.
-                        console.warn('[VTP Sửa Giờ] Không tìm thấy khung giờ "Cả ngày"');
+                        console.warn('[VTP Sửa Giờ] Không tìm thấy khung giờ "Cả ngày" trong dropdown');
                         await closeOpenForms();
                         shouldSkip = true;
                         skipReason = 'Không tải được khung giờ "Cả ngày"';
