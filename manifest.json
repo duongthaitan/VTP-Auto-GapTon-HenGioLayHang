@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "VTP Tool All-in-One",
-  "version": "3.2",
-  "description": "Tích hợp Auto Sửa Giờ và Auto Quét Kiểm Tồn ViettelPost",
+  "name": "ViettelPost AutoPilot",
+  "version": "3.0",
+  "description": "Hệ thống tự động hóa vận hành ViettelPost (Sửa Giờ, Đánh Giá 5★, Kiểm Kê Tồn, Kiểm Tra Đơn, Phân Công Tuyến)",
   "permissions": [
     "activeTab",
     "scripting",
@@ -13,6 +13,7 @@
   "host_permissions": [
     "*://*.viettelpost.vn/*",
     "*://*.viettelpost.com.vn/*",
+    "*://evtp2.viettelpost.vn/*",
     "http://localhost/*"
   ],
   "icons": {

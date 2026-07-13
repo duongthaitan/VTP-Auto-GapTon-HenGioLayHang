@@ -234,20 +234,23 @@
 | **Loại** | Chrome Extension (Manifest V3) |
 | **Tech** | Vanilla JS + HTML + CSS (không framework) |
 | **Entry** | `background.js` (SW) + `src/ui/sidepanel.html` |
-| **Target** | `*.viettelpost.vn`, `*.viettelpost.com.vn` |
-| **Modules** | Kiểm Kê Tồn Tuyến, Chỉnh Giờ Lấy Hàng, Dashboard Báo Cáo |
+| **Target** | `*.viettelpost.vn`, `*.viettelpost.com.vn`, `evtp2.viettelpost.vn` |
+| **Modules** | Sửa Giờ Lấy Hàng · Đánh Giá 5★ · Kiểm Kê Tồn Tuyến · Kiểm Tra Đơn (Chưa Phân Công / Phân Công Tuyến / Đơn Đi) |
 
 ### Cấu trúc:
 ```
 ├── manifest.json                    ← Manifest V3
-├── background.js                    ← Service Worker
+├── background.js                    ← Service Worker (mở Side Panel)
 ├── assets/icons/                    ← Extension icons
 ├── src/
-│   ├── ui/                          ← Side Panel (HTML + JS + CSS)
+│   ├── ui/                          ← Side Panel (HTML + JS + CSS) — điều phối toàn bộ
 │   ├── modules/
-│   │   ├── kiemke/                  ← Auto quét kiểm tồn
-│   │   └── chinhgio/                ← Auto sửa giờ lấy hàng
-│   └── shared/                      ← Utils dùng chung
+│   │   ├── chinhgio/                ← Auto sửa giờ lấy hàng
+│   │   ├── danhgia/                 ← Auto đánh giá 5★ bưu tá
+│   │   ├── kiemke/                  ← Auto kiểm kê tồn tuyến + quét mã (core scan, settings, smart delay)
+│   │   ├── kiemtradon/              ← Quét đơn chưa phân công (CPC) + tra cứu hành trình đơn đi
+│   │   └── donchpc/                 ← Auto phân công đơn theo tuyến bưu tá
+│   └── shared/                      ← Utils dùng chung (notification.js)
 ├── tools/test_server/               ← Local test server
 └── docs/                            ← Tài liệu
 ```
@@ -258,6 +261,10 @@
 | Tồn tuyến | Bưu phẩm tồn đọng trên tuyến phát |
 | Kiểm kê | Quét xác nhận bưu phẩm thực tế vs hệ thống |
 | Gáp tồn | Gộp/xác nhận bưu phẩm tồn |
+| Đơn chưa phân công (CPC) | Đơn nhận về chưa gán cho bưu tá nào |
+| Phân công phát | Gán đơn cho bưu tá theo tuyến (Nhân viên phát) |
+| Mã theo lô (F) | Mã dạng `<base>-<index>F<total>` (vd `...-5F5` = kiện 5/5) |
+| NVBH | Nhân viên bán hàng / bưu tá phát |
 | VTPVN | Prefix đơn TikTok |
 | SHOPEEVTPVN | Prefix đơn Shopee |
 

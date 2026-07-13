@@ -6,10 +6,10 @@
 
 window.VTPNotification = (function () {
     const COLORS = {
-        info:    { bg: '#333333', text: '#ffffff' },
-        success: { bg: '#28a745', text: '#ffffff' },
-        error:   { bg: '#dc3545', text: '#ffffff' },
-        warning: { bg: '#ffc107', text: '#212529' }
+        info:    { bg: '#1C1917', text: '#ffffff' },  // mực gần đen ấm
+        success: { bg: '#10B981', text: '#ffffff' },  // xanh lá hệ thống
+        error:   { bg: '#EE0033', text: '#ffffff' },  // đỏ VTP
+        warning: { bg: '#F59E0B', text: '#1C1917' }   // vàng hổ phách
     };
 
     // Giữ refs tới các timer hiện tại để clearTimeout đúng khi gọi liên tiếp

@@ -21,8 +21,10 @@ desktop.ini
 !/tools/test_server/server.js
 !/tools/test_server/kiemke_modules_test.html
 
-# Agent Artifacts
-.agent/
-
-# Local data (chứa thông tin khách hàng — không commit)
+# Dữ liệu nghiệp vụ — KHÔNG commit (chứa thông tin khách hàng thật: tên, địa chỉ, mã đơn)
 *.xlsx
+*.xls
+*.csv
+
+# Cấu hình công cụ agent nội bộ (có thể chứa thiết lập riêng)
+.agent/.openclaw/

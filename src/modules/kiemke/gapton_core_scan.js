@@ -361,12 +361,6 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         console.log('[VTP Core] TH2 –', msg);
         if (window.VTPNotification?.show) window.VTPNotification.show(msg, 'info');
 
-        // [Fix #45] Ghi số mã đã quét (=0) vào localStorage để sidepanel đọc.
-        // MAIN world không dùng được chrome.storage nên dùng localStorage page.
-        try {
-            localStorage.setItem('__VTP_LAST_SCAN_COUNT__', JSON.stringify({ count: 0, empty: true, ts: Date.now() }));
-        } catch (_) {}
-
         await new Promise(r => setTimeout(r, 200)); // [v2.0] Đợi trang ổn định (giảm từ 500ms)
         await clickHoanThanh();
 
@@ -428,40 +422,40 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
     }
 
     extUI.innerHTML = `
-        <div style="position:fixed;bottom:30px;right:30px;width:360px;background:#ffffff;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,0.15),0 1px 3px rgba(0,0,0,0.1);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;z-index:999999;overflow:hidden;animation:slideUpIn 0.3s ease-out forwards;display:flex;flex-direction:column;border:1px solid #dee2e6;">
-            <div style="background:#ee0033;padding:14px 20px;color:white;display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #cc002b;">
+        <div style="position:fixed;bottom:30px;right:30px;width:360px;background:#ffffff;border-radius:11px;box-shadow:0 12px 28px rgba(28,25,23,0.16),0 2px 6px rgba(28,25,23,0.08);font-family:'Be Vietnam Pro',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;z-index:999999;overflow:hidden;animation:slideUpIn 0.3s ease-out forwards;display:flex;flex-direction:column;border:1px solid #E7E3DB;">
+            <div style="background:#EE0033;padding:13px 20px;color:white;display:flex;justify-content:space-between;align-items:center;">
                 <div style="display:flex;align-items:center;gap:8px;">
                     <h3 style="margin:0;font-size:15px;font-weight:600;text-transform:uppercase;">Kiểm Kê Tự Động</h3>
                 </div>
                 <button id="vtp-btn-close" style="background:none;border:none;color:white;cursor:pointer;font-size:22px;line-height:1;padding:0;">&times;</button>
             </div>
-            <div style="display:flex;border-bottom:1px solid #dee2e6;background:#f8f9fa;">
-                <button id="vtp-tab-progress" style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid #00857f;color:#00857f;font-weight:bold;cursor:pointer;font-size:13px;">Đang Xử Lý</button>
-                <button id="vtp-tab-history"  style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid transparent;color:#6c757d;font-weight:bold;cursor:pointer;font-size:13px;">Lịch Sử (0)</button>
-                <button id="vtp-tab-settings" style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid transparent;color:#6c757d;font-weight:bold;cursor:pointer;font-size:13px;">⚙️ Cài Đặt</button>
+            <div style="display:flex;border-bottom:1px solid #E7E3DB;background:#FAF9F7;">
+                <button id="vtp-tab-progress" style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid #EE0033;color:#EE0033;font-weight:bold;cursor:pointer;font-size:13px;">Đang Xử Lý</button>
+                <button id="vtp-tab-history"  style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid transparent;color:#78716C;font-weight:bold;cursor:pointer;font-size:13px;">Lịch Sử (0)</button>
+                <button id="vtp-tab-settings" style="flex:1;padding:10px 0;background:none;border:none;border-bottom:2px solid transparent;color:#78716C;font-weight:bold;cursor:pointer;font-size:13px;">Cài Đặt</button>
             </div>
-            <div id="vtp-view-progress" style="padding:24px 20px;">
+            <div id="vtp-view-progress" style="padding:22px 20px;">
                 <div style="display:flex;align-items:center;justify-content:center;margin-bottom:15px;">
-                    <span style="font-weight:500;font-size:15px;color:#333;">Đã quét tổng cộng:</span>
-                    <span id="vtp-current-count" style="border-radius:60%;padding:3px 14px;background:#fff;border:1px solid #666;color:#882831;text-align:center;font-weight:bold;font-size:16px;margin-left:10px;">0</span>
+                    <span style="font-weight:500;font-size:14px;color:#57534E;">Đã quét tổng cộng:</span>
+                    <span id="vtp-current-count" style="border-radius:6px;padding:2px 12px;background:#FAF9F7;border:1px solid #E7E3DB;color:#EE0033;text-align:center;font-weight:800;font-size:16px;margin-left:10px;">0</span>
                 </div>
-                <div style="width:100%;background:#e9ecef;border-radius:6px;height:10px;margin-bottom:5px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,0.1);">
-                    <div id="vtp-real-progress-bar" style="width:0%;background:linear-gradient(90deg,#00857f,#20c997);height:100%;transition:width 0.3s ease-out;border-radius:6px;"></div>
+                <div style="width:100%;background:#F3F1EC;border-radius:6px;height:8px;margin-bottom:5px;overflow:hidden;">
+                    <div id="vtp-real-progress-bar" style="width:0%;background:#EE0033;height:100%;transition:width 0.3s ease-out;border-radius:6px;"></div>
                 </div>
-                <div id="vtp-progress-text" style="text-align:right;font-size:11px;color:#6c757d;margin-bottom:15px;font-weight:600;">0 / 0 mã (Đang tính...)</div>
-                <div id="vtp-status-container" style="background:#e8f4f8;border:1px solid #b8daff;border-radius:6px;padding:12px 15px;display:flex;align-items:center;gap:12px;margin-bottom:15px;">
-                    <div id="vtp-status-text" style="font-size:14px;color:#004085;font-weight:600;">Hệ thống đang khởi động...</div>
+                <div id="vtp-progress-text" style="text-align:right;font-size:11px;color:#A8A29A;margin-bottom:15px;font-weight:600;">0 / 0 mã (Đang tính...)</div>
+                <div id="vtp-status-container" style="background:#FAF9F7;border:1px solid #E7E3DB;border-radius:8px;padding:12px 15px;display:flex;align-items:center;gap:12px;margin-bottom:15px;">
+                    <div id="vtp-status-text" style="font-size:13.5px;color:#57534E;font-weight:600;">Hệ thống đang khởi động...</div>
                 </div>
-                <button id="vtp-btn-pause" style="width:100%;padding:10px;background:#ffc107;color:#212529;border:1px solid #ffb300;border-radius:4px;font-weight:bold;cursor:pointer;">Tạm dừng</button>
+                <button id="vtp-btn-pause" style="width:100%;padding:10px;background:#F59E0B;color:#1C1917;border:1px solid #E0900A;border-radius:7px;font-weight:bold;cursor:pointer;">Tạm dừng</button>
             </div>
-            <div id="vtp-view-history" style="display:none;padding:15px 20px;background:#f8f9fa;">
-                <button id="vtp-btn-export" style="width:100%;margin-bottom:12px;padding:10px;background:#28a745;color:white;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">Xuất file Excel (CSV)</button>
+            <div id="vtp-view-history" style="display:none;padding:15px 20px;background:#FAF9F7;">
+                <button id="vtp-btn-export" style="width:100%;margin-bottom:12px;padding:10px;background:#10B981;color:white;border:none;border-radius:7px;font-weight:bold;cursor:pointer;">Xuất file Excel (CSV)</button>
                 <div id="vtp-history-list" style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;"></div>
             </div>
-            <div id="vtp-view-settings" style="display:none;padding:15px 20px;background:#f8f9fa;">
+            <div id="vtp-view-settings" style="display:none;padding:15px 20px;background:#FAF9F7;">
                 <div style="display:flex;gap:8px;margin-bottom:15px;">
-                    <input id="vtp-input-prefix" type="text" placeholder="Nhập đầu mã..." style="flex:1;padding:8px;border:1px solid #ced4da;border-radius:4px;text-transform:uppercase;">
-                    <button id="vtp-btn-add-prefix" style="padding:8px 15px;background:#00857f;color:white;border:none;border-radius:4px;cursor:pointer;font-weight:bold;">Thêm</button>
+                    <input id="vtp-input-prefix" type="text" placeholder="Nhập đầu mã..." style="flex:1;padding:8px;border:1px solid #D6D2CB;border-radius:7px;text-transform:uppercase;">
+                    <button id="vtp-btn-add-prefix" style="padding:8px 15px;background:#EE0033;color:white;border:none;border-radius:7px;cursor:pointer;font-weight:bold;">Thêm</button>
                 </div>
                 <div id="vtp-prefix-list" style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow-y:auto;"></div>
             </div>
@@ -501,8 +495,8 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         ['Progress', 'History', 'Settings'].forEach(name => {
             const isActive = name === active;
             tabs['view' + name].style.display           = isActive ? 'block' : 'none';
-            tabs['btn'  + name].style.borderBottomColor = isActive ? '#00857f' : 'transparent';
-            tabs['btn'  + name].style.color             = isActive ? '#00857f' : '#6c757d';
+            tabs['btn'  + name].style.borderBottomColor = isActive ? '#EE0033' : 'transparent';
+            tabs['btn'  + name].style.color             = isActive ? '#EE0033' : '#78716C';
         });
     }
 
@@ -520,8 +514,8 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         const frag = document.createDocumentFragment();
         window.VTPSettings.getPrefixes().forEach(prefix => {
             const tag = document.createElement('div');
-            tag.style.cssText = 'background:#e9ecef;border:1px solid #ced4da;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:bold;color:#495057;display:flex;align-items:center;gap:5px;';
-            tag.innerHTML     = `<span>${prefix}</span> <span class="vtp-prefix-remove" data-val="${prefix}" style="cursor:pointer;color:#dc3545;">&times;</span>`;
+            tag.style.cssText = 'background:#F3F1EC;border:1px solid #E7E3DB;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:bold;color:#57534E;display:flex;align-items:center;gap:5px;';
+            tag.innerHTML     = `<span>${prefix}</span> <span class="vtp-prefix-remove" data-val="${prefix}" style="cursor:pointer;color:#EE0033;">&times;</span>`;
             frag.appendChild(tag);
         });
         prefixListEl.appendChild(frag);
@@ -548,13 +542,13 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         isPaused = !isPaused;
         if (isPaused) {
             pauseBtn.textContent      = 'Tiếp tục';
-            pauseBtn.style.background = '#007bff';
+            pauseBtn.style.background = '#10B981';
             pauseBtn.style.color      = 'white';
             statusEl.textContent      = 'Đã tạm dừng';
         } else {
             pauseBtn.textContent      = 'Tạm dừng';
-            pauseBtn.style.background = '#ffc107';
-            pauseBtn.style.color      = '#212529';
+            pauseBtn.style.background = '#F59E0B';
+            pauseBtn.style.color      = '#1C1917';
         }
     };
 
@@ -612,18 +606,13 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         // Khởi tạo tổng mã trang mới
         if (totalOnPage === 0) totalOnPage = allCodesOnPage.length;
 
-        // [v2.1 perf] Tìm mã chưa quét + đếm remaining trong CÙNG 1 vòng duyệt.
-        // Trước đây gọi getValidCodes() rồi filter() 2 lần riêng → O(n) thừa
-        // mỗi iteration (nặng với trang nhiều mã). Gộp lại còn 1 lượt duyệt.
+        // Tìm mã đầu tiên chưa quét — O(n) worst case
         let target = null;
-        let remaining = 0;
         for (const item of allCodesOnPage) {
-            if (!processedCodeSet.has(item.code)) {
-                remaining++;
-                if (!target) target = item;
-            }
+            if (!processedCodeSet.has(item.code)) { target = item; break; }
         }
 
+        const remaining      = target ? allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length : 0;
         const processedOnPage = totalOnPage - remaining;
         updateProgress(processedOnPage, totalOnPage);
 
@@ -678,12 +667,12 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         processedCount++;
 
         countEl.textContent               = processedCount;
-        statusContainer.style.background  = '#e8f4f8';
-        statusContainer.style.borderColor = '#b8daff';
+        statusContainer.style.background  = '#FAF9F7';
+        statusContainer.style.borderColor = '#E7E3DB';
         statusEl.innerHTML                = `Trang ${currentPage} - Đang xử lý: <b style="letter-spacing:0.5px;">${code}</b>`;
 
         element.scrollIntoView({ behavior: 'instant', block: 'nearest' });
-        element.style.backgroundColor = '#ffc107';
+        element.style.backgroundColor = '#F59E0B';
         inputField.focus();
 
         // Native value setter (bypass React/Angular controlled input)
@@ -701,7 +690,7 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
             }));
         });
 
-        element.style.backgroundColor = '#28a745';
+        element.style.backgroundColor = '#10B981';
 
         // Chờ xác nhận xử lý xong
         let isSuccess = false;
@@ -719,21 +708,19 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         if (isStopped) break;
 
         // Cập nhật UI sau khi quét xong 1 mã
-        // [v2.1 perf] Đã quét thêm 1 mã trên trang này → processedOnPage + 1.
-        // Tránh filter() lại toàn bộ allCodesOnPage (O(n) thừa mỗi mã).
         const timeScanned = new Date().toLocaleTimeString();
-        const totalDone   = Math.min(processedOnPage + 1, totalOnPage);
+        const totalDone   = totalOnPage - allCodesOnPage.filter(i => !processedCodeSet.has(i.code)).length;
         updateProgress(totalDone, totalOnPage);
 
         if (!isSuccess) {
-            element.style.backgroundColor = '#dc3545';
-            addHistoryItem(`<span style="color:#dc3545;font-weight:600;">${code} (Lỗi / Timeout)</span>`);
+            element.style.backgroundColor = '#EE0033';
+            addHistoryItem(`<span style="color:#EE0033;font-weight:600;">${code} (Lỗi / Timeout)</span>`);
             exportDataArray.push({ stt: processedCount, code, page: currentPage, time: timeScanned, status: 'Lỗi / Timeout' });
             if (window.VTPSmartDelay) await window.VTPSmartDelay.sleep(30); // [v2.0] Giảm từ 100ms
         } else {
             addHistoryItem(
-                `<span style="color:#28a745;font-weight:600;">${code} ` +
-                `<span style="font-weight:normal;color:#6c757d;font-size:11px;">(Trang ${currentPage})</span></span>`
+                `<span style="color:#10B981;font-weight:600;">${code} ` +
+                `<span style="font-weight:normal;color:#A8A29A;font-size:11px;">(Trang ${currentPage})</span></span>`
             );
             exportDataArray.push({ stt: processedCount, code, page: currentPage, time: timeScanned, status: 'Hoàn Thành' });
         }
@@ -748,9 +735,9 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
     // ════════════════════════════════════════════════════════════
     if (!isStopped) {
         progressBarEl.style.width        = '100%';
-        progressBarEl.style.background   = 'linear-gradient(90deg, #28a745, #20c997)';
-        statusContainer.style.background = '#d4edda';
-        statusEl.style.color             = '#155724';
+        progressBarEl.style.background   = '#10B981';
+        statusContainer.style.background = '#ECFDF5';
+        statusEl.style.color             = '#059669';
         statusEl.innerHTML               = `✅ Hoàn tất: <b>${processedCount}</b> bưu phẩm! Đang bấm Hoàn thành...`;
         pauseBtn.style.display           = 'none';
 
@@ -758,11 +745,6 @@ window.__VTP_CORE_SCAN_RUNNING__ = true;
         if (!clicked) {
             console.warn('[VTP Core] ⚠️ Không tìm thấy nút Hoàn thành');
         }
-
-        // [Fix #45] Ghi số mã đã quét vào localStorage để sidepanel đọc & log.
-        try {
-            localStorage.setItem('__VTP_LAST_SCAN_COUNT__', JSON.stringify({ count: processedCount, empty: false, ts: Date.now() }));
-        } catch (_) {}
 
         // Báo hiệu cho sidepanel → đợi 2s → F5
         // [v1.4] Dùng chrome.storage.local — tồn tại qua reload

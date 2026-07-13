@@ -1,28 +1,24 @@
 // ============================================================
 //  VTP Tool – Popup Controller
-//  v3.2 — Excel-driven Customer Picker
-//    - Fix #28: Storage cleanup — xóa billList mồ côi khi không
-//        còn isRunning (legacy từ textarea cũ)
-//    - Fix #27: Re-wire delayInput — dùng làm khoảng cách giữa
-//        các đơn (delay sleep), KHÔNG còn sleep tĩnh trước Tầng 2
-//    - Tính năng: chọn file .xlsx → group theo TEN_KHGUI →
-//        click checkbox khách → ẩn các khách khác
-//    - Fix #25: Speed boost — giảm sleep tĩnh trong content/
-//        sidepanel ~5s/đơn
-//    - Fix #24: Sửa Giờ treo khi chuyển tab khác
-//        • Tăng timeout/đơn 120s → 300s, retry busy/timeout
-//    - Fix #23: chrome.storage.local.set() KHÔNG hoạt động từ
-//        world:'MAIN' → waitForTabReload thay storage signal
+//  v2.5 Critical Fix:
+//    - Fix #23: chrome.storage.local.set() KHÔNG hoạt động từ world:'MAIN'
+//              (Chrome MV3 không cấp Extension API cho MAIN world scripts)
+//              → Thay bằng waitForTabReload: gapton_core_scan LUÔN gọi
+//              location.reload() khi xong → tab reload = tín hiệu scan done
+//    - Fix #22: pollScanComplete đăng ký TRƯỚC inject (giữ lại backup)
+//    - Fix #21: chrome.storage.local thay vì window variable
+//    - Fix #17: Bỏ double F5
+//    - Fix #20: reloadAfterScanPromise đăng ký TRƯỚC inject
 // ============================================================
 document.addEventListener('DOMContentLoaded', async () => {
 
     // Fix #5: Hẳng số HTML cho các nút — tránh copy-paste, tái sử dụng
     const BTN_HTML = {
-        startPlay:    `<svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14"><polygon points="4,2 17,10 4,18"/></svg> Bắt Đầu Chạy`,
-        startRunning: `<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><path d="M21 12a9 9 0 11-3.36-7.02"/></svg> Đang chạy…`,
-        kiemkePlay:   `<svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><polygon points="4 2.5 17 10 4 17.5"/></svg> Chạy Kiểm Kê Tự Động`,
-        kiemkeRun:    `<svg class="spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><path d="M21 12a9 9 0 11-3.36-7.02"/></svg> Đang kiểm kê...`,
-        gaptonPlay:   `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15"><path d="M17.5 13.3V6.7a1.7 1.7 0 00-.83-1.44L10.83 1.9a1.7 1.7 0 00-1.66 0L3.33 5.26A1.7 1.7 0 002.5 6.7v6.6a1.7 1.7 0 00.83 1.44l5.84 3.36a1.7 1.7 0 001.66 0l5.84-3.36A1.7 1.7 0 0017.5 13.3z"/></svg> Quét Mã Thủ Công`,
+        startPlay:    `<i class="bi bi-play-fill" style="font-size: 14px; margin-right: 4px;"></i> Bắt Đầu Chạy`,
+        startRunning: `<i class="bi bi-arrow-repeat spin" style="font-size: 14px; margin-right: 4px; display: inline-block;"></i> Đang chạy…`,
+        kiemkePlay:   `<i class="bi bi-play-circle-fill" style="font-size: 15px; margin-right: 4px;"></i> Chạy Kiểm Kê Tự Động`,
+        kiemkeRun:    `<i class="bi bi-arrow-repeat spin" style="font-size: 14px; margin-right: 4px; display: inline-block;"></i> Đang kiểm kê...`,
+        gaptonPlay:   `<i class="bi bi-qr-code-scan" style="font-size: 14px; margin-right: 4px;"></i> Quét Mã Thủ Công`,
     };
 
     // ════════════════════════════════════════
@@ -61,435 +57,330 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     // ════════════════════════════════════════
-    //  FILE PICKER + CUSTOMER COMBO (Sửa Giờ)
-    //  Thay textarea cũ — load .xlsx, group theo TEN_KHGUI,
-    //  pick MA_PHIEUGUI làm bill list.
+    //  ACTION MODE SWITCHER — Sửa Giờ vs Đánh Giá 5★
     // ════════════════════════════════════════
-    const excelFileInput      = document.getElementById('excelFileInput');
-    const excelFilePickBtn    = document.getElementById('excelFilePickBtn');
-    const excelFilePickLabel  = document.getElementById('excelFilePickLabel');
-    const filePickerSubtitle  = document.getElementById('filePickerSubtitle');
-    const fileTotalCount      = document.getElementById('fileTotalCount');
-    const fileInfo            = document.getElementById('fileInfo');
-    const fileInfoName        = document.getElementById('fileInfoName');
-    const fileInfoClear       = document.getElementById('fileInfoClear');
+    const modeBtnChinhGio2 = document.getElementById('modeBtnChinhGio2');
+    const modeBtnDanhGia   = document.getElementById('modeBtnDanhGia');
+    const billCountEl      = document.getElementById('billCount');
+    const sectionTitleText = document.getElementById('sectionTitleText');
 
-    const customerCard         = document.getElementById('customerCard');
-    const customerSearch       = document.getElementById('customerSearch');
-    const customerClear        = document.getElementById('customerClear');
-    const customerList         = document.getElementById('customerList');
-    const customerListHeader   = document.getElementById('customerListHeader');
-    const customerResetBtn     = document.getElementById('customerResetBtn');
-    const customerOrderCount   = document.getElementById('customerOrderCount');
-    const customerSubtitle     = document.getElementById('customerSubtitle');
+    let _actionMode  = 'chinhgio'; // 'chinhgio' | 'danhgia'
+    let _excelBills  = [];         // Mã từ Excel (sau khi chọn khách)
+    let _excelData   = {};         // { customerName: [codes] }
 
-    // State trong session — không persist qua đóng Chrome
-    let _customerMap      = new Map(); // Map<TEN_KHGUI, MA_PHIEUGUI[]>
-    let _selectedCustomer = null;
-    let _activeIdx        = -1;
-    // [Fix #37] Chế độ nhập mã đơn: 'excel' (mặc định) hoặc 'paste'
-    let _inputMode        = 'excel';
-    let _pastedBills      = [];
+    function setActionMode(mode) {
+        _actionMode = mode;
+        modeBtnChinhGio2.classList.toggle('active', mode === 'chinhgio');
+        modeBtnDanhGia.classList.toggle('active', mode === 'danhgia');
+        // Cập nhật section title
+        if (sectionTitleText) {
+            sectionTitleText.textContent = mode === 'chinhgio'
+                ? 'Tự động cập nhật giờ lấy hàng'
+                : 'Tự động đánh giá 5★ bưu tá';
+        }
+    }
 
+    modeBtnChinhGio2.addEventListener('click', () => setActionMode('chinhgio'));
+    modeBtnDanhGia.addEventListener('click', () => setActionMode('danhgia'));
+
+    // ════════════════════════════════════════
+    //  parseBills() — lấy danh sách mã từ Excel
+    // ════════════════════════════════════════
     function parseBills() {
-        if (_inputMode === 'paste') {
-            // [Fix #38] Đọc trực tiếp từ textarea, KHÔNG qua cache _pastedBills
-            // — tránh race với debounce 150ms khi user paste rồi click Start ngay.
-            const ta = document.getElementById('pasteBillsInput');
-            return parsePastedBills(ta ? ta.value : '');
-        }
-        if (!_selectedCustomer) return [];
-        return _customerMap.get(_selectedCustomer) || [];
+        return _excelBills.slice();
     }
 
-    /**
-     * [Fix #37] Parse nội dung textarea → mảng mã đơn.
-     * Tách theo newline / phẩy / chấm phẩy / tab / khoảng trắng.
-     * Chuẩn hoá NBSP→space, trim, bỏ rỗng, KHỬ TRÙNG LẶP giữ thứ tự.
-     */
-    function parsePastedBills(text) {
-        if (!text) return [];
-        const seen = new Set();
-        const out = [];
-        for (const tok of String(text).split(/[\s,;]+/)) {
-            const cleaned = tok
-                .replace(/ /g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim();
-            if (!cleaned || seen.has(cleaned)) continue;
-            seen.add(cleaned);
-            out.push(cleaned);
-        }
-        return out;
+    function updateBillCount() {
+        const bills = parseBills();
+        const count = bills.length;
+        const text  = `${count} mã`;
+        const has   = count > 0;
+
+        billCountEl.textContent = text;
+        billCountEl.classList.toggle('has-bills', has);
     }
 
-    function setFileInfo(fileName, totalOrders) {
-        if (fileName) {
-            fileInfo.style.display = 'flex';
-            fileInfoName.textContent = fileName;
-            fileInfoName.title = fileName;
-            excelFilePickLabel.textContent = 'Chọn file khác';
-            filePickerSubtitle.textContent = `Đã load ${_customerMap.size} khách hàng`;
-            fileTotalCount.textContent = `${totalOrders.toLocaleString('vi-VN')} đơn`;
-            fileTotalCount.style.display = 'inline-flex';
-            fileTotalCount.classList.add('has-bills');
-        } else {
-            fileInfo.style.display = 'none';
-            fileInfoName.textContent = '—';
-            excelFilePickLabel.textContent = 'Chọn file Excel';
-            filePickerSubtitle.textContent = 'Chọn file để load danh sách khách';
-            fileTotalCount.style.display = 'none';
-        }
+    // ════════════════════════════════════════
+    //  EXCEL UPLOAD — Drag & Drop + Click
+    // ════════════════════════════════════════
+    const excelDropzone   = document.getElementById('excelDropzone');
+    const excelFileInput  = document.getElementById('excelFileInput');
+    const dropzoneContent = document.getElementById('dropzoneContent');
+    const dropzoneLoaded  = document.getElementById('dropzoneLoaded');
+    const loadedFileName  = document.getElementById('loadedFileName');
+    const clearExcelBtn   = document.getElementById('clearExcelBtn');
+    const customerSection = document.getElementById('customerSection');
+    const customerSearch  = document.getElementById('customerSearch');
+    const clearSearchBtn  = document.getElementById('clearCustomerSearch');
+    const customerSummary = document.getElementById('customerSummary');
+    const customerListEl  = document.getElementById('customerList');
+    const selectedBillsEl = document.getElementById('selectedCustomerBills');
+    const selectedNameEl  = document.getElementById('selectedCustomerName');
+    const selectedListEl  = document.getElementById('selectedBillsList');
+    const backToListBtn   = document.getElementById('backToListBtn');
+
+    // ── Click dropzone to open file picker ──
+    excelDropzone.addEventListener('click', (e) => {
+        if (e.target.closest('.loaded-file-clear')) return; // Don't trigger on clear button
+        excelFileInput.click();
+    });
+
+    // ── File input change ──
+    excelFileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) processExcelFile(e.target.files[0]);
+    });
+
+    // ── Drag & Drop events ──
+    excelDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        excelDropzone.classList.add('drag-over');
+    });
+    excelDropzone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        excelDropzone.classList.remove('drag-over');
+    });
+    excelDropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        excelDropzone.classList.remove('drag-over');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) processExcelFile(file);
+    });
+
+    // ── Clear Excel ──
+    clearExcelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        resetExcelState();
+    });
+
+    function resetExcelState() {
+        _excelData  = {};
+        _excelBills = [];
+        excelFileInput.value = '';
+        dropzoneContent.style.display = 'flex';
+        dropzoneLoaded.style.display  = 'none';
+        customerSection.style.display = 'none';
+        selectedBillsEl.style.display = 'none';
+        customerListEl.style.display  = 'flex';
+        customerSearch.value = '';
+        clearSearchBtn.style.display = 'none';
+        updateBillCount();
     }
 
-    /**
-     * Trả về danh sách khách hiển thị trên UI.
-     * Khi đã chọn 1 khách → CHỈ trả về khách đó (ẩn các khách khác).
-     * Khi chưa chọn → áp dụng search query, sort theo số đơn giảm dần.
-     */
-    function getDisplayedEntries() {
-        if (_selectedCustomer && _customerMap.has(_selectedCustomer)) {
-            return [[_selectedCustomer, _customerMap.get(_selectedCustomer)]];
-        }
-        const q = customerSearch.value.trim().toLowerCase();
-        let entries = Array.from(_customerMap.entries());
-        if (q) {
-            entries = entries.filter(([name]) => name.toLowerCase().includes(q));
-        }
-        // Sort mặc định: nhiều đơn trước
-        entries.sort((a, b) => b[1].length - a[1].length);
-        return entries;
-    }
-
-    function highlightMatch(name, query) {
-        if (!query) return null;
-        const lower = name.toLowerCase();
-        const q = query.toLowerCase();
-        const idx = lower.indexOf(q);
-        if (idx < 0) return null;
-        const frag = document.createDocumentFragment();
-        if (idx > 0) frag.appendChild(document.createTextNode(name.slice(0, idx)));
-        const mark = document.createElement('mark');
-        mark.textContent = name.slice(idx, idx + query.length);
-        frag.appendChild(mark);
-        if (idx + query.length < name.length) {
-            frag.appendChild(document.createTextNode(name.slice(idx + query.length)));
-        }
-        return frag;
-    }
-
-    function renderCustomerList() {
-        const entries = getDisplayedEntries();
-        const total = _customerMap.size;
-
-        // Update header text
-        if (_selectedCustomer) {
-            customerListHeader.textContent = `Đang chọn (${total - 1} khách khác đã ẩn)`;
-            customerResetBtn.style.display = 'flex';
-        } else {
-            const q = customerSearch.value.trim();
-            if (q) {
-                customerListHeader.textContent = `${entries.length} / ${total} khách`;
-            } else {
-                customerListHeader.textContent = `${total} khách`;
-            }
-            customerResetBtn.style.display = 'none';
-        }
-
-        if (entries.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'cust-empty';
-            empty.textContent = 'Không tìm thấy khách phù hợp';
-            customerList.innerHTML = '';
-            customerList.appendChild(empty);
-            _activeIdx = -1;
+    // ── Process Excel File ──
+    function processExcelFile(file) {
+        const validExts = ['.xlsx', '.xls', '.csv'];
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        if (!validExts.includes(ext)) {
+            alert('Chỉ hỗ trợ file .xlsx, .xls hoặc .csv!');
             return;
         }
 
-        const q = _selectedCustomer ? '' : customerSearch.value.trim();
-        const frag = document.createDocumentFragment();
-        entries.forEach(([name, bills], idx) => {
-            const item = document.createElement('div');
-            item.className = 'cust-item';
-            item.dataset.name = name;
-            item.dataset.idx = idx;
-            if (name === _selectedCustomer) item.classList.add('is-selected');
-            if (idx === _activeIdx) item.classList.add('is-active');
+        loadedFileName.textContent = file.name;
+        dropzoneContent.style.display = 'none';
+        dropzoneLoaded.style.display  = 'block';
 
-            const cb = document.createElement('span');
-            cb.className = 'cust-cb';
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
-            const nameEl = document.createElement('span');
-            nameEl.className = 'cust-item-name';
-            nameEl.title = name;
-            const highlighted = highlightMatch(name, q);
-            if (highlighted) nameEl.appendChild(highlighted);
-            else nameEl.textContent = name;
-
-            const countEl = document.createElement('span');
-            countEl.className = 'cust-item-count';
-            countEl.textContent = `${bills.length} đơn`;
-
-            item.appendChild(cb);
-            item.appendChild(nameEl);
-            item.appendChild(countEl);
-            item.addEventListener('click', () => {
-                if (_selectedCustomer === name) {
-                    // Click lại khách đang chọn → bỏ chọn
-                    clearCustomerSelection();
-                } else {
-                    selectCustomer(name);
+                if (rows.length < 2) {
+                    alert('File Excel không có dữ liệu!');
+                    resetExcelState();
+                    return;
                 }
+
+                // Find column indices
+                const headers = rows[0].map(h => String(h || '').trim());
+                const maIdx   = headers.indexOf('MA_PHIEUGUI');
+                const tenIdx  = headers.indexOf('TEN_KHGUI');
+
+                if (maIdx < 0) {
+                    alert('Không tìm thấy cột "MA_PHIEUGUI" trong file Excel!\n\nCác cột hiện có: ' + headers.join(', '));
+                    resetExcelState();
+                    return;
+                }
+                if (tenIdx < 0) {
+                    alert('Không tìm thấy cột "TEN_KHGUI" trong file Excel!\n\nCác cột hiện có: ' + headers.join(', '));
+                    resetExcelState();
+                    return;
+                }
+
+                // Group by customer name
+                const groups = {};
+                let totalBills = 0;
+                for (let i = 1; i < rows.length; i++) {
+                    const row  = rows[i];
+                    const name = String(row[tenIdx] || '').trim();
+                    const code = String(row[maIdx]  || '').trim();
+                    if (!name || !code) continue;
+                    if (!groups[name]) groups[name] = [];
+                    groups[name].push(code);
+                    totalBills++;
+                }
+
+                if (Object.keys(groups).length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ trong file!');
+                    resetExcelState();
+                    return;
+                }
+
+                _excelData = groups;
+                _excelBills = []; // Clear until user picks a customer
+                customerSection.style.display = 'block';
+                renderCustomerList('');
+
+                console.log(`[VTP Excel] Đã đọc ${totalBills} đơn từ ${Object.keys(groups).length} khách hàng`);
+                updateBillCount();
+
+            } catch (err) {
+                console.error('[VTP Excel] Lỗi đọc file:', err);
+                alert('Lỗi đọc file Excel: ' + err.message);
+                resetExcelState();
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // ════════════════════════════════════════
+    //  CUSTOMER LIST — Render, Search, Select
+    // ════════════════════════════════════════
+
+    function renderCustomerList(filter) {
+        customerListEl.innerHTML = '';
+        selectedBillsEl.style.display = 'none';
+        customerListEl.style.display  = 'flex';
+
+        const entries = Object.entries(_excelData);
+        const totalCustomers = entries.length;
+        const totalBills = entries.reduce((sum, [_, codes]) => sum + codes.length, 0);
+
+        // Filter
+        const normalFilter = filter.toLowerCase().trim();
+        const filtered = normalFilter
+            ? entries.filter(([name]) => name.toLowerCase().includes(normalFilter))
+            : entries;
+
+        // Sort by bill count (descending)
+        filtered.sort((a, b) => b[1].length - a[1].length);
+
+        // Summary
+        if (normalFilter) {
+            customerSummary.querySelector('.summary-total').textContent =
+                `Tìm thấy ${filtered.length}/${totalCustomers} khách · ${totalBills} đơn tổng`;
+        } else {
+            customerSummary.querySelector('.summary-total').textContent =
+                `${totalCustomers} khách hàng · ${totalBills} đơn`;
+        }
+
+        if (filtered.length === 0) {
+            customerListEl.innerHTML = `
+                <div class="empty-state" style="padding:16px 0">
+                    <p class="empty-title">Không tìm thấy khách hàng</p>
+                    <p class="empty-hint">Thử từ khóa khác</p>
+                </div>`;
+            return;
+        }
+
+        // Add "All customers" option
+        const allItem = document.createElement('div');
+        allItem.className = 'customer-item';
+        allItem.style.background = 'linear-gradient(135deg, var(--red-pale) 0%, var(--red-pale2) 100%)';
+        allItem.style.borderColor = 'var(--red-border)';
+        allItem.innerHTML = `
+            <div class="customer-avatar" style="background:linear-gradient(135deg,var(--red),var(--red-hover));color:white;border-color:var(--red);">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                    <circle cx="10" cy="7" r="3.5"/><path d="M3 17.5c0-4 3.13-7 7-7s7 3 7 7"/>
+                </svg>
+            </div>
+            <div class="customer-info">
+                <div class="customer-name" style="color:var(--red);font-weight:700">TẤT CẢ KHÁCH HÀNG</div>
+                <div class="customer-meta">${filtered.length} khách · ${filtered.reduce((s,[_,c]) => s + c.length, 0)} đơn</div>
+            </div>
+            <span class="customer-count-badge">${filtered.reduce((s,[_,c]) => s + c.length, 0)}</span>
+            <svg class="customer-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
+                <polyline points="7 4 13 10 7 16"/>
+            </svg>`;
+        allItem.addEventListener('click', () => {
+            // Select ALL bills from filtered customers
+            _excelBills = filtered.flatMap(([_, codes]) => codes);
+            showSelectedBills('TẤT CẢ KHÁCH HÀNG', _excelBills);
+        });
+        customerListEl.appendChild(allItem);
+
+        // Individual customers
+        const frag = document.createDocumentFragment();
+        filtered.forEach(([name, codes]) => {
+            const initials = name.split(/[\s-]+/).map(w => w.charAt(0).toUpperCase()).slice(0, 2).join('');
+            const item = document.createElement('div');
+            item.className = 'customer-item';
+            item.innerHTML = `
+                <div class="customer-avatar">${initials}</div>
+                <div class="customer-info">
+                    <div class="customer-name">${name}</div>
+                    <div class="customer-meta">${codes.length} đơn hàng</div>
+                </div>
+                <span class="customer-count-badge">${codes.length}</span>
+                <svg class="customer-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
+                    <polyline points="7 4 13 10 7 16"/>
+                </svg>`;
+            item.addEventListener('click', () => {
+                _excelBills = codes.slice();
+                showSelectedBills(name, codes);
             });
             frag.appendChild(item);
         });
-        customerList.innerHTML = '';
-        customerList.appendChild(frag);
+        customerListEl.appendChild(frag);
     }
 
-    function selectCustomer(name) {
-        if (!_customerMap.has(name)) return;
-        _selectedCustomer = name;
-        const bills = _customerMap.get(name);
-        customerOrderCount.textContent = `${bills.length} đơn`;
-        customerOrderCount.style.display = 'inline-flex';
-        customerOrderCount.classList.add('has-bills');
-        customerSubtitle.textContent = 'Sẵn sàng chạy';
-        // Khi đã chọn → xóa search query để header hiển thị rõ
-        customerSearch.value = '';
-        customerClear.style.display = 'none';
-        renderCustomerList();
-        try {
-            chrome.storage.session?.set({ vtpSelectedCustomer: name });
-        } catch (_) {}
+    // ── Show selected customer's bills ──
+    function showSelectedBills(customerName, bills) {
+        customerListEl.style.display  = 'none';
+        selectedBillsEl.style.display = 'block';
+        selectedNameEl.textContent    = `${customerName} (${bills.length} đơn)`;
+
+        selectedListEl.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        bills.forEach((code, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'bill-chip';
+            chip.innerHTML = `
+                <span class="bill-chip-num">${idx + 1}</span>
+                <span class="bill-chip-code">${code}</span>`;
+            frag.appendChild(chip);
+        });
+        selectedListEl.appendChild(frag);
+        updateBillCount();
     }
 
-    function clearCustomerSelection() {
-        _selectedCustomer = null;
-        customerOrderCount.style.display = 'none';
-        customerSubtitle.textContent = 'Chọn khách để chạy đơn';
-        try { chrome.storage.session?.remove('vtpSelectedCustomer'); } catch (_) {}
-        renderCustomerList();
-    }
-
-    function clearFile() {
-        _customerMap = new Map();
-        _selectedCustomer = null;
-        excelFileInput.value = '';
-        setFileInfo(null, 0);
-        customerCard.style.display = 'none';
-        clearCustomerSelection();
-        try {
-            chrome.storage.session?.remove([
-                'vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer'
-            ]);
-        } catch (_) {}
-    }
-
-    async function handleFileChosen(file) {
-        if (!file) return;
-        try {
-            excelFilePickBtn.disabled = true;
-            excelFilePickBtn.classList.add('is-loading');
-            excelFilePickLabel.textContent = 'Đang đọc file...';
-            // [Fix #32] Yield UI 1 frame để spinner kịp render trước khi
-            // parse chiếm main thread (file vài MB block ~1-2s)
-            await new Promise(r => requestAnimationFrame(() => r()));
-
-            const result = await window.VTPXlsx.parseFile(file, { headerRow: 1 });
-
-            if (!result.headers.includes('TEN_KHGUI') || !result.headers.includes('MA_PHIEUGUI')) {
-                throw new Error('File thiếu cột TEN_KHGUI hoặc MA_PHIEUGUI');
-            }
-
-            _customerMap = window.VTPXlsx.groupBy(result.byHeader, 'TEN_KHGUI', 'MA_PHIEUGUI');
-
-            if (_customerMap.size === 0) {
-                throw new Error('Không tìm thấy đơn hàng nào trong file');
-            }
-
-            const totalOrders = result.byHeader.length;
-            setFileInfo(file.name, totalOrders);
-            customerCard.style.display = 'block';
-            clearCustomerSelection();
-            renderCustomerList();
-
-            try {
-                const serialized = Array.from(_customerMap.entries());
-                chrome.storage.session?.set({
-                    vtpFileName:    file.name,
-                    vtpCustomerMap: serialized
-                });
-            } catch (_) {}
-
-        } catch (err) {
-            console.error('[VTP Sửa Giờ] Lỗi đọc file:', err);
-            alert('Không đọc được file Excel: ' + err.message);
-            clearFile();
-        } finally {
-            excelFilePickBtn.disabled = false;
-            excelFilePickBtn.classList.remove('is-loading');
-        }
-    }
-
-    // ── Wire events ──
-    excelFilePickBtn.addEventListener('click', () => excelFileInput.click());
-    excelFileInput.addEventListener('change', (e) => {
-        const f = e.target.files?.[0];
-        if (f) handleFileChosen(f);
-    });
-    fileInfoClear.addEventListener('click', clearFile);
-
-    // Drag & drop trên nút chọn file
-    excelFilePickBtn.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        excelFilePickBtn.classList.add('is-dragover');
-    });
-    excelFilePickBtn.addEventListener('dragleave', () => {
-        excelFilePickBtn.classList.remove('is-dragover');
-    });
-    excelFilePickBtn.addEventListener('drop', (e) => {
-        e.preventDefault();
-        excelFilePickBtn.classList.remove('is-dragover');
-        const f = e.dataTransfer?.files?.[0];
-        if (f) handleFileChosen(f);
+    // ── Back to customer list ──
+    backToListBtn.addEventListener('click', () => {
+        _excelBills = [];
+        selectedBillsEl.style.display = 'none';
+        customerListEl.style.display  = 'flex';
+        updateBillCount();
     });
 
-    // ════════════════════════════════════════
-    //  [Fix #37] INPUT MODE TOGGLE + PASTE BILLS
-    //  2 chế độ loại trừ nhau: 'excel' (file picker)  /  'paste' (textarea)
-    // ════════════════════════════════════════
-    const modeExcelBtn      = document.getElementById('modeExcelBtn');
-    const modePasteBtn      = document.getElementById('modePasteBtn');
-    const modePanelExcel    = document.getElementById('modePanelExcel');
-    const modePanelPaste    = document.getElementById('modePanelPaste');
-    const pasteBillsInput   = document.getElementById('pasteBillsInput');
-    const pasteCountBadge   = document.getElementById('pasteCount');
-
-    function setInputMode(mode) {
-        _inputMode = (mode === 'paste') ? 'paste' : 'excel';
-        const isPaste = _inputMode === 'paste';
-
-        modePanelExcel.style.display = isPaste ? 'none' : '';
-        modePanelPaste.style.display = isPaste ? '' : 'none';
-
-        modeExcelBtn.classList.toggle('active', !isPaste);
-        modePasteBtn.classList.toggle('active', isPaste);
-        modeExcelBtn.setAttribute('aria-selected', String(!isPaste));
-        modePasteBtn.setAttribute('aria-selected', String(isPaste));
-
-        try { chrome.storage.session?.set({ vtpInputMode: _inputMode }); } catch (_) {}
-    }
-
-    function refreshPasteCount() {
-        const n = _pastedBills.length;
-        if (n > 0) {
-            pasteCountBadge.textContent = `${n.toLocaleString('vi-VN')} đơn`;
-            pasteCountBadge.style.display = 'inline-flex';
-            pasteCountBadge.classList.add('has-bills');
-        } else {
-            pasteCountBadge.style.display = 'none';
-        }
-    }
-
-    modeExcelBtn.addEventListener('click', () => setInputMode('excel'));
-    modePasteBtn.addEventListener('click', () => setInputMode('paste'));
-
-    // Parse textarea (debounce 150ms để không tốn CPU khi user gõ nhanh)
-    let _pasteTimer = null;
-    pasteBillsInput.addEventListener('input', () => {
-        clearTimeout(_pasteTimer);
-        _pasteTimer = setTimeout(() => {
-            _pastedBills = parsePastedBills(pasteBillsInput.value);
-            refreshPasteCount();
-            try { chrome.storage.session?.set({ vtpPastedText: pasteBillsInput.value }); } catch (_) {}
-        }, 150);
-    });
-
-    // Search (debounced)
+    // ── Customer search (debounced) ──
     let _searchTimer = null;
     customerSearch.addEventListener('input', () => {
-        customerClear.style.display = customerSearch.value ? 'flex' : 'none';
-        // Nếu user gõ trong khi đang chọn 1 khách → coi như muốn chọn lại
-        if (_selectedCustomer) {
-            _selectedCustomer = null;
-            customerOrderCount.style.display = 'none';
-            customerSubtitle.textContent = 'Chọn khách để chạy đơn';
-            try { chrome.storage.session?.remove('vtpSelectedCustomer'); } catch (_) {}
-        }
-        _activeIdx = -1;
+        const val = customerSearch.value;
+        clearSearchBtn.style.display = val ? 'flex' : 'none';
         clearTimeout(_searchTimer);
-        _searchTimer = setTimeout(renderCustomerList, 80);
-    });
-    customerSearch.addEventListener('keydown', (e) => {
-        const items = customerList.querySelectorAll('.cust-item');
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            _activeIdx = Math.min(_activeIdx + 1, items.length - 1);
-            updateActive(items);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            _activeIdx = Math.max(_activeIdx - 1, 0);
-            updateActive(items);
-        } else if (e.key === 'Enter' && _activeIdx >= 0) {
-            e.preventDefault();
-            const name = items[_activeIdx]?.dataset.name;
-            if (name) selectCustomer(name);
-        } else if (e.key === 'Escape') {
-            customerSearch.value = '';
-            customerClear.style.display = 'none';
-            _activeIdx = -1;
-            renderCustomerList();
-            customerSearch.blur();
-        }
+        _searchTimer = setTimeout(() => renderCustomerList(val), 150);
     });
 
-    function updateActive(items) {
-        items.forEach((it, i) => it.classList.toggle('is-active', i === _activeIdx));
-        if (_activeIdx >= 0 && items[_activeIdx]) {
-            items[_activeIdx].scrollIntoView({ block: 'nearest' });
-        }
-    }
-
-    customerClear.addEventListener('click', () => {
+    clearSearchBtn.addEventListener('click', () => {
         customerSearch.value = '';
-        customerClear.style.display = 'none';
-        _activeIdx = -1;
-        renderCustomerList();
-        customerSearch.focus();
+        clearSearchBtn.style.display = 'none';
+        renderCustomerList('');
     });
-
-    customerResetBtn.addEventListener('click', clearCustomerSelection);
-
-    // Restore session
-    try {
-        chrome.storage.session?.get(
-            ['vtpFileName', 'vtpCustomerMap', 'vtpSelectedCustomer',
-             'vtpInputMode', 'vtpPastedText'],
-            (data) => {
-                if (data?.vtpCustomerMap && data.vtpCustomerMap.length > 0) {
-                    _customerMap = new Map(data.vtpCustomerMap);
-                    let total = 0;
-                    _customerMap.forEach(v => total += v.length);
-                    setFileInfo(data.vtpFileName || 'file đã chọn', total);
-                    customerCard.style.display = 'block';
-                    renderCustomerList();
-                    if (data.vtpSelectedCustomer && _customerMap.has(data.vtpSelectedCustomer)) {
-                        selectCustomer(data.vtpSelectedCustomer);
-                    }
-                }
-                // [Fix #37] Khôi phục mã đã dán + chế độ
-                if (data?.vtpPastedText) {
-                    pasteBillsInput.value = data.vtpPastedText;
-                    _pastedBills = parsePastedBills(data.vtpPastedText);
-                    refreshPasteCount();
-                }
-                if (data?.vtpInputMode === 'paste') {
-                    setInputMode('paste');
-                }
-            }
-        );
-    } catch (_) {}
 
     // ════════════════════════════════════════
     //  DELAY STEPPER (+/−)
@@ -509,79 +400,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const progressCard = document.getElementById('progressContainer');
     const progressBar  = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
-    const progressCurrent     = document.getElementById('progressCurrent');
-    const progressCurrentCode = document.getElementById('progressCurrentCode');
     const statusDot    = document.querySelector('#statusChinhGio .status-dot');
     const statusMsg    = document.querySelector('#statusChinhGio .status-text');
-
-    // ════════════════════════════════════════
-    //  [Fix #43] LIVE LOG — Nhật ký thao tác real-time
-    //  Content script ghi __VTP_CHINHGIO_LOG__ mỗi bước → render ở đây.
-    // ════════════════════════════════════════
-    const liveLogCard  = document.getElementById('liveLogCard');
-    const liveLogBody  = document.getElementById('liveLogBody');
-    const liveLogClear = document.getElementById('liveLogClear');
-    const MAX_LOG_ITEMS = 200;
-    let _lastLogKey = '';
-
-    function escapeLog(s) {
-        return String(s ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function appendLiveLog(entry) {
-        if (!liveLogCard || !liveLogBody || !entry) return;
-        liveLogCard.style.display = 'block';
-
-        const typeClass = entry.type === 'success' ? 'is-success'
-                        : entry.type === 'warning' ? 'is-warning' : '';
-        const time = entry.ts
-            ? new Date(entry.ts).toLocaleTimeString('vi-VN', { hour12: false })
-            : '';
-        const billLine = (entry.index != null && entry.total != null)
-            ? `<span class="livelog-bill">Đơn ${entry.index + 1}/${entry.total} · ${escapeLog(entry.bill)}</span>`
-            : '';
-
-        const item = document.createElement('div');
-        item.className = `livelog-item ${typeClass}`.trim();
-        item.innerHTML =
-            `<span class="livelog-step">${escapeLog(entry.step)}</span>` +
-            `<div class="livelog-main">` +
-                `<span class="livelog-text">${escapeLog(entry.text)}</span>` +
-                billLine +
-            `</div>` +
-            `<span class="livelog-time">${escapeLog(time)}</span>`;
-
-        liveLogBody.appendChild(item);
-        while (liveLogBody.children.length > MAX_LOG_ITEMS) {
-            liveLogBody.removeChild(liveLogBody.firstChild);
-        }
-        // Auto-scroll xuống mục mới nhất
-        liveLogBody.scrollTop = liveLogBody.scrollHeight;
-    }
-
-    function clearLiveLog() {
-        if (liveLogBody) liveLogBody.innerHTML = '';
-        if (liveLogCard) liveLogCard.style.display = 'none';
-        _lastLogKey = '';
-        try { chrome.storage.local.remove('__VTP_CHINHGIO_LOG__'); } catch (_) {}
-    }
-
-    if (liveLogClear) liveLogClear.addEventListener('click', clearLiveLog);
-
-    // [Fix #26] Hiển thị mã đơn đang chạy
-    function setCurrentBill(bill) {
-        if (!progressCurrent || !progressCurrentCode) return;
-        if (bill) {
-            progressCurrent.style.display = 'flex';
-            progressCurrentCode.textContent = bill;
-            progressCurrentCode.title = bill;
-        } else {
-            progressCurrent.style.display = 'none';
-            progressCurrentCode.textContent = '—';
-        }
-    }
 
     function updateProgressUI(current, total) {
         if (total > 0) {
@@ -592,7 +412,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             if (current >= total) {
                 if (statusMsg) statusMsg.textContent      = '✅ Đã hoàn thành!';
-                if (statusDot) statusDot.style.background = '#22c55e';
+                if (statusDot) statusDot.style.background = '#10B981';
             } else {
                 if (statusMsg) statusMsg.textContent      = `Đang xử lý đơn ${current + 1} / ${total}…`;
                 if (statusDot) statusDot.style.background = '#f59e0b';
@@ -603,93 +423,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // ════════════════════════════════════════
-    //  [Fix #40] BÁO CÁO KẾT QUẢ — sau khi chạy xong
-    // ════════════════════════════════════════
-    const reportCard         = document.getElementById('reportCard');
-    const reportBody         = document.getElementById('reportBody');
-    const reportTabFail      = document.getElementById('reportTabFail');
-    const reportTabSuccess   = document.getElementById('reportTabSuccess');
-    const reportFailCount    = document.getElementById('reportFailCount');
-    const reportSuccessCount = document.getElementById('reportSuccessCount');
-    const reportCopyBtn      = document.getElementById('reportCopyBtn');
-    const reportCopyLabel    = document.getElementById('reportCopyLabel');
-
-    let _reportFail    = [];   // [{bill, reason}]
-    let _reportSuccess = [];   // [bill]
-    let _reportTab     = 'fail';
-
-    function escapeHtml(s) {
-        return String(s ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function renderReportBody() {
-        const items = _reportTab === 'fail' ? _reportFail : _reportSuccess;
-        if (items.length === 0) {
-            reportBody.innerHTML = `<div class="report-empty">${
-                _reportTab === 'fail'
-                    ? 'Không có đơn nào thất bại 🎉'
-                    : 'Chưa có đơn nào thành công'
-            }</div>`;
-            return;
-        }
-        if (_reportTab === 'fail') {
-            reportBody.innerHTML = items.map((it, i) => `
-                <div class="report-item is-fail">
-                    <span class="report-item-num">${i + 1}</span>
-                    <div class="report-item-main">
-                        <span class="report-item-bill">${escapeHtml(it.bill)}</span>
-                        <span class="report-item-reason">${escapeHtml(it.reason)}</span>
-                    </div>
-                </div>`).join('');
-        } else {
-            reportBody.innerHTML = items.map((bill, i) => `
-                <div class="report-item is-success">
-                    <span class="report-item-num">${i + 1}</span>
-                    <span class="report-item-bill">${escapeHtml(bill)}</span>
-                </div>`).join('');
-        }
-    }
-
-    function setReportTab(tab) {
-        _reportTab = (tab === 'success') ? 'success' : 'fail';
-        reportTabFail.classList.toggle('active', _reportTab === 'fail');
-        reportTabSuccess.classList.toggle('active', _reportTab === 'success');
-        renderReportBody();
-    }
-
-    function renderReport(successList, failList) {
-        _reportSuccess = successList || [];
-        _reportFail    = failList    || [];
-        reportFailCount.textContent    = _reportFail.length;
-        reportSuccessCount.textContent = _reportSuccess.length;
-        // Mặc định mở tab "Thất bại" nếu có fail, ngược lại mở "Thành công"
-        setReportTab(_reportFail.length > 0 ? 'fail' : 'success');
-        reportCard.style.display = 'block';
-    }
-
-    reportTabFail.addEventListener('click',    () => setReportTab('fail'));
-    reportTabSuccess.addEventListener('click', () => setReportTab('success'));
-
-    reportCopyBtn.addEventListener('click', async () => {
-        const items = _reportTab === 'fail' ? _reportFail : _reportSuccess;
-        if (items.length === 0) return;
-        const text = _reportTab === 'fail'
-            ? items.map(it => `${it.bill}\t${it.reason}`).join('\n')
-            : items.join('\n');
-        try {
-            await navigator.clipboard.writeText(text);
-            const original = reportCopyLabel.textContent;
-            reportCopyLabel.textContent = '✓ Đã copy';
-            setTimeout(() => { reportCopyLabel.textContent = original; }, 1400);
-        } catch (e) {
-            console.warn('[VTP] Copy thất bại:', e);
-            alert('Không copy được vào clipboard.');
-        }
-    });
-
-    // ════════════════════════════════════════
     //  RESTORE STATE — khi mở lại popup
     // ════════════════════════════════════════
     chrome.storage.local.get(['isRunning', 'currentIndex', 'billList', 'delay'], (data) => {
@@ -697,18 +430,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (data.delay) {
             delayInput.value = data.delay;
         }
+        // Restore tiến trình nếu đang chạy
         if (data.isRunning && data.billList) {
-            // Đang chạy: khôi phục progress + mã đơn hiện tại
+            _excelBills = data.billList;
+            updateBillCount();
             updateProgressUI(data.currentIndex || 0, data.billList.length);
-            // [Fix #26] Khôi phục mã đơn đang chạy nếu có
-            const idx = data.currentIndex || 0;
-            if (idx < data.billList.length) {
-                setCurrentBill(data.billList[idx]);
-            }
-        } else if (data.billList || data.currentIndex !== undefined) {
-            // [Fix #28] Không chạy mà còn billList/currentIndex cũ →
-            // dọn để không gây hiểu lầm khi mở sidepanel sau này.
-            chrome.storage.local.remove(['billList', 'currentIndex']);
         }
     });
 
@@ -718,18 +444,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     // ════════════════════════════════════════
     chrome.storage.onChanged.addListener((changes, namespace) => {
         if (namespace !== 'local') return;
-
-        // [Fix #43] Nhật ký thao tác real-time
-        if (changes.__VTP_CHINHGIO_LOG__?.newValue) {
-            const entry = changes.__VTP_CHINHGIO_LOG__.newValue;
-            // Dedup bằng key (ts + seq) — ts luôn tăng giữa các đơn nên
-            // an toàn khi seq reset về 0 mỗi đơn mới.
-            const key = `${entry.ts}-${entry.seq}`;
-            if (key !== _lastLogKey) {
-                _lastLogKey = key;
-                appendLiveLog(entry);
-            }
-        }
 
         // Cập nhật tiến trình khi currentIndex thay đổi
         if (changes.currentIndex) {
@@ -744,8 +458,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Cập nhật trạng thái khi dừng
         if (changes.isRunning && changes.isRunning.newValue === false) {
             if (statusMsg) statusMsg.textContent      = 'Đã dừng.';
-            if (statusDot) statusDot.style.background = '#6b7280';
-            setCurrentBill(null); // [Fix #26]
+            if (statusDot) statusDot.style.background = '#78716C';
             // Re-enable nút Start khi script báo đã dừng
             const startBtn = document.getElementById('startChinhGioBtn');
             if (startBtn) startBtn.disabled = false;
@@ -801,14 +514,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const delay = parseInt(delayInput.value) || 4;
 
         if (bills.length === 0) {
-            // [Fix #37] Thông báo theo chế độ đang dùng
-            if (_inputMode === 'paste') {
-                alert('Vui lòng dán ít nhất 1 mã đơn vào ô bên trên!');
-            } else if (!_selectedCustomer) {
-                alert('Vui lòng chọn file Excel và chọn khách hàng trước khi chạy!');
-            } else {
-                alert('Khách hàng đã chọn không có đơn nào.');
-            }
+            alert('Vui lòng dán ít nhất 1 mã vận đơn!');
             return;
         }
 
@@ -820,66 +526,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         const mainTabId = tab.id;
 
-        // [Fix #50] Tự điều hướng đến trang Quản lý vận đơn trước khi chạy.
-        // Nếu tab hiện tại KHÔNG ở trang quan-ly-van-don → chuyển đến đó rồi
-        // chờ load xong. Tránh inject sai trang (nguyên nhân fail hàng loạt).
-        const TARGET_URL = 'https://viettelpost.vn/quan-ly-van-don';
-        const isOnOrderPage = (u) => /viettelpost\.vn\/quan-ly-van-don/i.test(u || '');
-
-        // Helper: chờ tab load xong (status complete) tới đúng trang đích
-        const waitForTabComplete = (tabId, urlKeyword, timeoutMs = 45000) =>
-            new Promise((resolve) => {
-                const timer = setTimeout(() => {
-                    chrome.tabs.onUpdated.removeListener(listener);
-                    resolve(false);
-                }, timeoutMs);
-                const listener = (tid, changeInfo, updated) => {
-                    if (tid !== tabId || changeInfo.status !== 'complete') return;
-                    if (!urlKeyword || (updated.url || '').includes(urlKeyword)) {
-                        clearTimeout(timer);
-                        chrome.tabs.onUpdated.removeListener(listener);
-                        resolve(true);
-                    }
-                };
-                chrome.tabs.onUpdated.addListener(listener);
-            });
-
-        if (!isOnOrderPage(tab.url)) {
-            startChinhGioBtn.disabled  = true;
-            startChinhGioBtn.innerHTML = BTN_HTML.startRunning;
-            if (statusMsg) statusMsg.textContent      = 'Đang chuyển đến trang Quản lý vận đơn…';
-            if (statusDot) statusDot.style.background = '#f59e0b';
-
-            const navDone = waitForTabComplete(mainTabId, 'quan-ly-van-don', 45000);
-            try {
-                await chrome.tabs.update(mainTabId, { url: TARGET_URL });
-            } catch (e) {
-                alert('Không thể mở trang Quản lý vận đơn: ' + e.message);
-                startChinhGioBtn.disabled  = false;
-                startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
-                return;
-            }
-            const navOk = await navDone;
-            if (!navOk) {
-                alert('Trang Quản lý vận đơn tải quá lâu. Vui lòng thử lại!');
-                startChinhGioBtn.disabled  = false;
-                startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
-                if (statusMsg) statusMsg.textContent = 'Đã dừng.';
-                return;
-            }
-            // SPA Angular cần thêm thời gian render form danh sách sau 'complete'
-            await new Promise(r => setTimeout(r, 1500));
-        }
-
         // Disable UI
         startChinhGioBtn.disabled  = true;
         startChinhGioBtn.innerHTML = BTN_HTML.startRunning;
-
-        // [Fix #40] Ẩn báo cáo của phiên trước khi bắt đầu phiên mới
-        if (reportCard) reportCard.style.display = 'none';
-
-        // [Fix #43] Dọn nhật ký thao tác của phiên trước
-        clearLiveLog();
 
         await chrome.storage.local.set({
             billList:     bills,
@@ -891,71 +540,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // ── Vòng lặp chính — chạy ở sidepanel (KHÔNG bị throttle) ──
         const skipList = [];
-        const successList = [];
-
-        // [Fix #53] Adaptive delay — theo dõi thời gian thực mỗi đơn
-        // để tự điều chỉnh delay giữa các đơn thay vì sleep cứng 4s.
-        const _billDurations = []; // ms mỗi đơn gần nhất
-        const MAX_DURATION_SAMPLES = 10; // sliding window
-        const computeAdaptiveGap = () => {
-            if (_billDurations.length < 2) return 1500; // Mặc định ban đầu
-            const avg = _billDurations.reduce((a, b) => a + b, 0) / _billDurations.length;
-            // Mạng rất nhanh (< 5s/đơn): gap 300ms đủ
-            if (avg < 5000)  return 300;
-            // Mạng nhanh (5-10s): gap 500ms
-            if (avg < 10000) return 500;
-            // Mạng trung bình (10-20s): gap 800ms
-            if (avg < 20000) return 800;
-            // Mạng chậm (> 20s): gap 1500ms
-            return 1500;
-        };
-
-        // [Fix #24] Helper: inject + chờ kết quả 1 đơn, có retry khi 'busy'/'timeout'
-        async function runOneBillWithRetry(bill, maxAttempts = 2) {
-            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-                // Xóa signal cũ
-                try { await chrome.storage.local.remove('__VTP_CHINHGIO_STEP_DONE__'); } catch (_) {}
-
-                // Inject content script xử lý 1 đơn
-                try {
-                    await chrome.scripting.executeScript({
-                        target: { tabId: mainTabId },
-                        files: ['src/shared/notification.js', 'src/modules/chinhgio/chinhgio_content.js'],
-                        injectImmediately: true  // [Fix #24] tránh delay khi tab background
-                    });
-                } catch (e) {
-                    return { status: 'error', reason: 'Inject thất bại: ' + e.message };
-                }
-
-                // [Fix #24] Tăng timeout 120s → 300s vì tab background có thể chậm
-                const result = await waitForChinhGioStepDone(300000);
-
-                // 'busy' = script cũ chưa thoát (do timeout trước đó)
-                // → chờ 2s rồi retry
-                if (result.status === 'busy' && attempt < maxAttempts) {
-                    console.warn(`[VTP Sửa Giờ] Script còn busy, chờ 2s rồi retry (lần ${attempt + 1}/${maxAttempts})`);
-                    await new Promise(r => setTimeout(r, 2000));
-                    continue;
-                }
-
-                // 'timeout' = đợi quá 300s mà không có signal
-                // → retry 1 lần (có thể tab vừa chuyển active xong)
-                if (result.status === 'timeout' && attempt < maxAttempts) {
-                    console.warn(`[VTP Sửa Giờ] Timeout 300s đơn "${bill}", retry lần ${attempt + 1}/${maxAttempts}`);
-                    // Reset cờ guard ở page để inject mới chạy được
-                    try {
-                        await chrome.scripting.executeScript({
-                            target: { tabId: mainTabId },
-                            func: () => { window.__VTP_CHINHGIO_RUNNING__ = false; }
-                        });
-                    } catch (_) {}
-                    continue;
-                }
-
-                return result;
-            }
-            return { status: 'timeout', reason: 'Hết số lần thử' };
-        }
 
         for (let i = 0; i < bills.length; i++) {
             // Kiểm tra user bấm Dừng
@@ -969,73 +553,54 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (statusMsg) statusMsg.textContent      = `Đang xử lý đơn ${i + 1} / ${bills.length}…`;
             if (statusDot) statusDot.style.background = '#f59e0b';
             updateProgressUI(i, bills.length);
-            setCurrentBill(bills[i]); // [Fix #26]
 
-            // [Fix #24] Inject + chờ kết quả với retry khi busy/timeout
-            const result = await runOneBillWithRetry(bills[i], 2);
-            console.log(`[VTP Sửa Giờ] Kết quả đơn ${i + 1}:`, result.status, result.bill || '');
+            // Xóa signal cũ
+            try { await chrome.storage.local.remove('__VTP_CHINHGIO_STEP_DONE__'); } catch (_) {}
 
-            if (result.status === 'skipped' || result.status === 'error' || result.status === 'timeout') {
-                skipList.push({
-                    bill:   result.bill || bills[i],
-                    reason: result.reason || (result.status === 'timeout' ? 'Quá thời gian xử lý' : 'Lỗi không xác định')
+            // Inject content script xử lý 1 đơn (tuỳ theo action mode)
+            const contentFiles = _actionMode === 'danhgia'
+                ? ['src/shared/notification.js', 'src/modules/danhgia/danhgia_content.js']
+                : ['src/shared/notification.js', 'src/modules/chinhgio/chinhgio_content.js'];
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: mainTabId },
+                    files: contentFiles
                 });
-                // Khi timeout: index ở storage chưa được tăng (script chưa chạy xong)
-                // → tự tăng để vòng lặp không kẹt ở cùng 1 đơn
-                if (result.status === 'timeout') {
-                    const cur = await chrome.storage.local.get(['currentIndex']);
-                    if ((cur.currentIndex || 0) <= i) {
-                        await chrome.storage.local.set({ currentIndex: i + 1 });
-                    }
-                }
-            } else if (result.status === 'success') {
-                successList.push(result.bill || bills[i]);
+            } catch (e) {
+                console.error('[VTP] Lỗi inject:', e);
+                skipList.push({ bill: bills[i], reason: 'Inject thất bại: ' + e.message });
+                continue;
             }
 
-            // [Fix #53] Thu thập durationMs cho adaptive delay
-            if (typeof result.durationMs === 'number' && result.durationMs > 0) {
-                _billDurations.push(result.durationMs);
-                if (_billDurations.length > MAX_DURATION_SAMPLES) _billDurations.shift();
+            // Chờ content script hoàn thành 1 đơn (max 2 phút)
+            const result = await waitForChinhGioStepDone(120000);
+            console.log(`[VTP Sửa Giờ] Kết quả đơn ${i + 1}:`, result.status, result.bill || '');
+
+            if (result.status === 'skipped' || result.status === 'error') {
+                skipList.push({ bill: result.bill || bills[i], reason: result.reason || 'Lỗi không xác định' });
             }
 
             // Cập nhật progress
             updateProgressUI(i + 1, bills.length);
 
-            // [Fix #53] Adaptive delay giữa các đơn — tự điều chỉnh theo tốc độ mạng.
-            // Mạng nhanh: ~300ms. Mạng chậm: ~1500ms. User có thể override.
-            // Nếu user chỉnh delay > 2s → tôn trọng giá trị user (ưu tiên an toàn).
+            // Delay giữa các đơn — chạy ở sidepanel → KHÔNG bị throttle!
+            // [v3.1] Mode-dependent: đánh giá 300ms (modal-based, nhanh), sửa giờ 1000ms (form, cần buffer)
             if (i < bills.length - 1) {
-                const userDelay = parseInt(delayInput.value, 10) || 4;
-                let gapMs;
-                if (userDelay > 2) {
-                    // User đặt delay cao → tôn trọng (có thể cố tình chậm để tránh rate-limit)
-                    gapMs = userDelay * 1000;
-                } else {
-                    // User để mặc định hoặc đặt thấp → dùng adaptive
-                    gapMs = computeAdaptiveGap();
-                }
-                gapMs = Math.max(200, gapMs);
-                console.log(`[VTP Sửa Giờ] Delay giữa đơn: ${gapMs}ms (avg=${Math.round((_billDurations.reduce((a,b)=>a+b,0)||0)/(_billDurations.length||1))}ms, samples=${_billDurations.length})`);
-                await new Promise(r => setTimeout(r, gapMs));
+                const interDelay = _actionMode === 'danhgia' ? 300 : 1000;
+                await new Promise(r => setTimeout(r, interDelay));
             }
         }
 
         // ── Hoàn tất ──
         await chrome.storage.local.set({ isRunning: false });
-        setCurrentBill(null); // [Fix #26]
 
         if (skipList.length === 0) {
             if (statusMsg) statusMsg.textContent      = '✅ Đã hoàn thành!';
-            if (statusDot) statusDot.style.background = '#22c55e';
+            if (statusDot) statusDot.style.background = '#10B981';
         } else {
             if (statusMsg) statusMsg.textContent      = `⚠️ Xong — Bỏ qua ${skipList.length} đơn`;
             if (statusDot) statusDot.style.background = '#f59e0b';
             console.warn('[VTP Sửa Giờ] Đơn bị bỏ qua:', skipList);
-        }
-
-        // [Fix #40] Hiển thị báo cáo kết quả (chỉ khi có ít nhất 1 đơn đã chạy)
-        if (successList.length + skipList.length > 0) {
-            renderReport(successList, skipList);
         }
 
         // Reset UI
@@ -1046,8 +611,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     stopChinhGioBtn.addEventListener('click', async () => {
         await chrome.storage.local.set({ isRunning: false });
         if (statusMsg) statusMsg.textContent      = 'Đã dừng.';
-        if (statusDot) statusDot.style.background = '#6b7280';
-        setCurrentBill(null); // [Fix #26]
+        if (statusDot) statusDot.style.background = '#78716C';
         startChinhGioBtn.disabled  = false;
         startChinhGioBtn.innerHTML = BTN_HTML.startPlay;
     });
@@ -1070,64 +634,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     const routeProgressStatus   = document.getElementById('routeProgressStatus');
     const routeElapsedEl        = document.getElementById('routeElapsedTime');     // Fix #7
     const routeEtaEl            = document.getElementById('routeEtaTime');         // Fix #7
-
-    // ════════════════════════════════════════
-    //  [Fix #44] LIVE LOG — Nhật ký thao tác Kiểm Kê Tuyến
-    //  Vòng lặp tuyến chạy ngay trong sidepanel → append thẳng vào DOM,
-    //  không cần qua storage như module Sửa Giờ.
-    // ════════════════════════════════════════
-    const routeLogCard  = document.getElementById('routeLogCard');
-    const routeLogBody  = document.getElementById('routeLogBody');
-    const routeLogClear = document.getElementById('routeLogClear');
-    const MAX_ROUTE_LOG = 250;
-
-    function escapeRouteLog(s) {
-        return String(s ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    /**
-     * Ghi 1 dòng nhật ký Kiểm Kê.
-     * @param {string|number} step  - nhãn bước (số hoặc icon)
-     * @param {string} text         - mô tả thao tác
-     * @param {string} [type]       - 'info' | 'success' | 'warning'
-     * @param {string} [route]      - tên tuyến (hiển thị dòng phụ)
-     */
-    function routeLog(step, text, type = 'info', route = '') {
-        if (!routeLogCard || !routeLogBody) return;
-        routeLogCard.style.display = 'block';
-
-        const typeClass = type === 'success' ? 'is-success'
-                        : type === 'warning' ? 'is-warning' : '';
-        const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-        const routeLine = route
-            ? `<span class="livelog-bill">${escapeRouteLog(route)}</span>`
-            : '';
-
-        const item = document.createElement('div');
-        item.className = `livelog-item ${typeClass}`.trim();
-        item.innerHTML =
-            `<span class="livelog-step">${escapeRouteLog(step)}</span>` +
-            `<div class="livelog-main">` +
-                `<span class="livelog-text">${escapeRouteLog(text)}</span>` +
-                routeLine +
-            `</div>` +
-            `<span class="livelog-time">${escapeRouteLog(time)}</span>`;
-
-        routeLogBody.appendChild(item);
-        while (routeLogBody.children.length > MAX_ROUTE_LOG) {
-            routeLogBody.removeChild(routeLogBody.firstChild);
-        }
-        routeLogBody.scrollTop = routeLogBody.scrollHeight;
-    }
-
-    function clearRouteLog() {
-        if (routeLogBody) routeLogBody.innerHTML = '';
-        if (routeLogCard) routeLogCard.style.display = 'none';
-    }
-
-    if (routeLogClear) routeLogClear.addEventListener('click', clearRouteLog);
 
     let loadedRoutes = []; // Danh sách tuyến đã load
 
@@ -1437,14 +943,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (routeElapsedEl) routeElapsedEl.textContent = '⏱ 00:00';
         if (routeEtaEl)     routeEtaEl.textContent     = '';
 
-        // [Fix #44] Dọn nhật ký phiên trước + log khởi động
-        clearRouteLog();
-        routeLog('▶', `Bắt đầu kiểm kê ${selectedRoutes.length} tuyến`, 'info');
-
         let completed  = 0;
         let errors     = [];
         let elapsedSec = 0;
-        let totalScanned = 0; // [Fix #45] tổng mã đã quét qua tất cả tuyến
 
         // Fix #7: ETA / elapsed timer
         const elapsedTimer = setInterval(() => {
@@ -1630,13 +1131,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Fix #1: Kiểm tra cancel trước mỗi tuyến
             if (cancelToken.cancelled) {
                 console.log('[VTP] ⏹ Hủy kiểm kê theo yêu cầu người dùng.');
-                routeLog('⏹', 'Đã dừng theo yêu cầu người dùng', 'warning');
                 break;
             }
 
             routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Kiểm kê: ${route}`;
             setRouteStatus(route, 'running'); // Fix #4
-            routeLog(`${i + 1}`, `Bắt đầu tuyến (${i + 1}/${selectedRoutes.length})`, 'info', route);
 
             try {
                 // A: Fix #2 — dùng mainTabId, không query theo active
@@ -1644,7 +1143,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // B: Chờ trang danh sách sẵn sàng (combobox phải xuất hiện)
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ trang danh sách sẵn sàng...`;
-                routeLog('⏳', 'Chờ trang danh sách sẵn sàng…', 'info', route);
                 const listReady = await waitForListPageReady(mainTabId, 45000);
                 if (!listReady) {
                     throw new Error('Trang danh sách không load được (timeout 45s). Vui lòng kiểm tra lại!');
@@ -1670,7 +1168,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // E: Đăng ký waitForScanPage TRƯỚC khi inject
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Thực hiện 5 bước: ${route}`;
-                routeLog('⚙', 'Thực hiện 5 bước chọn tuyến & tạo phiếu…', 'info', route);
                 const scanPagePromise = waitForScanPage(mainTabId, urlBefore, 90000);
 
                 // F: Inject kiemke_tuyen_auto (5 bước) + đánh dấu đã inject
@@ -1686,7 +1183,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // G: Chờ trang scan mở (URL change hoặc SPA input.clsinputpg)
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Chờ trang kiểm kê mở...`;
-                routeLog('⏳', 'Chờ trang kiểm kê mở…', 'info', route);
                 const scanPageReady = await scanPagePromise;
                 if (!scanPageReady) {
                     throw new Error('Không vào được trang kiểm kê sau 90 giây');
@@ -1698,7 +1194,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // H: Inject gapton_core_scan
                 routeProgressStatus.textContent = `[${i + 1}/${selectedRoutes.length}] Đang quét mã: ${route}`;
-                routeLog('📦', 'Đang quét mã kiểm tồn…', 'info', route);
                 console.log('[VTP] Inject gapton_core_scan.js...');
 
                 // [Fix #23] Dùng waitForTabReload thay vì chrome.storage signal
@@ -1708,15 +1203,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // → Tab reload chính là tín hiệu "quét xong" đáng tin cậy nhất
                 // PHẢI đăng ký TRƯỚC inject để không bỏ lỡ sự kiện reload
                 await clearScanComplete(); // dọn signal cũ (backward compat)
-                // [v2.1] Dọn count cũ trong localStorage TRƯỚC khi inject scan
-                // → đảm bảo giá trị đọc sau reload chắc chắn của tuyến hiện tại,
-                //   không nhầm count tuyến trước nếu engine không kịp ghi.
-                try {
-                    await chrome.scripting.executeScript({
-                        target: { tabId: mainTabId }, world: 'MAIN',
-                        func: () => { try { localStorage.removeItem('__VTP_LAST_SCAN_COUNT__'); } catch (_) {} }
-                    });
-                } catch (_) {}
                 const scanCompleteViaReload = waitForTabReload(mainTabId, '', 660000); // 11 phút
 
                 await chrome.scripting.executeScript({
@@ -1735,34 +1221,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     console.warn('[VTP] Scan timeout tuyến:', route);
                     errors.push({ route, error: 'Scan timeout sau 11 phút' });
                     setRouteStatus(route, 'error');
-                    routeLog('❌', 'Quét timeout sau 11 phút', 'warning', route);
                 } else {
                     console.log('[VTP] ✅ Scan xong (tab đã reload):', route);
                     setRouteStatus(route, 'done');
-                    // [Fix #45] Đọc số mã đã quét từ localStorage (engine ghi trước reload)
-                    let scanInfo = null;
-                    try {
-                        const res = await chrome.scripting.executeScript({
-                            target: { tabId: mainTabId }, world: 'MAIN',
-                            func: () => {
-                                try {
-                                    const raw = localStorage.getItem('__VTP_LAST_SCAN_COUNT__');
-                                    localStorage.removeItem('__VTP_LAST_SCAN_COUNT__');
-                                    return raw ? JSON.parse(raw) : null;
-                                } catch (_) { return null; }
-                            }
-                        });
-                        scanInfo = res?.[0]?.result || null;
-                    } catch (_) {}
-                    if (scanInfo && typeof scanInfo.count === 'number') {
-                        totalScanned += scanInfo.count;
-                        const detail = scanInfo.empty
-                            ? 'Tuyến trống — không có mã cần quét'
-                            : `Đã quét ${scanInfo.count} mã`;
-                        routeLog('✅', detail, 'success', route);
-                    } else {
-                        routeLog('✅', 'Quét xong tuyến', 'success', route);
-                    }
                 }
 
                 // J: Tab đã tự reload sau scan → KHÔNG waitForTabReload thêm
@@ -1787,7 +1248,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error(`[VTP] Lỗi tuyến "${route}":`, e);
                 errors.push({ route, error: e.message });
                 setRouteStatus(route, 'error'); // Fix #4
-                routeLog('❌', `Lỗi: ${e.message}`, 'warning', route);
                 // Sau lỗi: thử reload để vòng tiếp theo có trạng thái sạch
                 try {
                     const reloadPromise = waitForTabReload(mainTabId, '', 20000);
@@ -1819,14 +1279,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         if (cancelToken.cancelled) {
             routeProgressStatus.textContent = `⏹ Đã dừng. Hoàn thành ${completed}/${selectedRoutes.length} tuyến.`;
-            routeLog('⏹', `Đã dừng — hoàn thành ${completed}/${selectedRoutes.length} tuyến`, 'warning');
         } else if (errors.length === 0) {
             routeProgressStatus.textContent = `✅ Hoàn tất! Đã kiểm kê ${completed} tuyến thành công.`;
-            routeLog('🎉', `Hoàn tất! ${completed} tuyến · tổng ${totalScanned} mã đã quét`, 'success');
         } else {
             routeProgressStatus.textContent =
                 `⚠️ Hoàn tất ${completed} tuyến. ${errors.length} lỗi: ${errors.map(e => e.route).join(', ')}`;
-            routeLog('⚠', `Hoàn tất ${completed} tuyến · tổng ${totalScanned} mã · ${errors.length} lỗi`, 'warning');
         }
 
         // Reset UI
@@ -1869,6 +1326,1805 @@ document.addEventListener('DOMContentLoaded', async () => {
             startGapTonBtn.disabled  = false;
             startGapTonBtn.innerHTML = BTN_HTML.gaptonPlay;
         }, 3000);
+    });
+
+    // ════════════════════════════════════════
+    //  TAB 3 — KIỂM TRA ĐƠN
+    //  Tra cứu hành trình và kiểm tra đơn chưa phân công
+    // ════════════════════════════════════════
+
+    const KTD_URL = 'https://evtp2.viettelpost.vn/?uId=tra-cuu-hanh-trinh-vip';
+    const CPC_URL = 'https://evtp2.viettelpost.vn/?uId=khai-thac-den/khai-thac';
+
+    // ── DOM refs ──
+    const ktdModeSwitcher         = document.getElementById('ktdModeSwitcher');
+    const ktdModeChuaPhanCong     = document.getElementById('ktdModeChuaPhanCong');
+    const ktdModePhanCongTuyen     = document.getElementById('ktdModePhanCongTuyen');
+    const ktdModeDonDi            = document.getElementById('ktdModeDonDi');
+    const ktdCpcInstructionsCard  = document.getElementById('ktdCpcInstructionsCard');
+    const ktdPctCard               = document.getElementById('ktdPctInstructionsCard');
+    const ktdSectionTitleText     = document.getElementById('ktdSectionTitleText');
+
+    const ktdDropzone        = document.getElementById('ktdDropzone');
+    const ktdFileInput       = document.getElementById('ktdFileInput');
+    const ktdDropzoneContent = document.getElementById('ktdDropzoneContent');
+    const ktdDropzoneLoaded  = document.getElementById('ktdDropzoneLoaded');
+    const ktdLoadedFileName  = document.getElementById('ktdLoadedFileName');
+    const ktdClearBtn        = document.getElementById('ktdClearBtn');
+    const ktdCustomerSection = document.getElementById('ktdCustomerSection');
+    const ktdCustomerSearch  = document.getElementById('ktdCustomerSearch');
+    const ktdClearSearch     = document.getElementById('ktdClearSearch');
+    const ktdCustomerSummary = document.getElementById('ktdCustomerSummary');
+    const ktdCustomerList    = document.getElementById('ktdCustomerList');
+    const ktdSelectedBills   = document.getElementById('ktdSelectedBills');
+    const ktdSelectedName    = document.getElementById('ktdSelectedName');
+    const ktdSelectedList    = document.getElementById('ktdSelectedList');
+    const ktdBackBtn         = document.getElementById('ktdBackBtn');
+    const ktdBillCountEl     = document.getElementById('ktdBillCount');
+    const startKtdBtn        = document.getElementById('startKiemTraDonBtn');
+    const stopKtdBtn         = document.getElementById('stopKiemTraDonBtn');
+    const ktdProgressCard    = document.getElementById('ktdProgressContainer');
+    const ktdProgressBar     = document.getElementById('ktdProgressBar');
+    const ktdProgressText    = document.getElementById('ktdProgressText');
+    const ktdStatusDot       = document.querySelector('#ktdStatus .status-dot');
+    const ktdStatusMsg       = document.querySelector('#ktdStatus .status-text');
+    const ktdResultsCard     = document.getElementById('ktdResultsCard');
+    const ktdResultsBody     = document.getElementById('ktdResultsBody');
+    const ktdResultSummary   = document.getElementById('ktdResultSummary');
+    const ktdExportBtn       = document.getElementById('ktdExportBtn');
+
+    let _ktdExcelData  = {}; // { maKH: [mã phiếu gửi] }
+    let _ktdBills      = []; // Danh sách mã phiếu gửi đã chọn
+    let _ktdResults    = []; // Kết quả tra cứu
+    let _ktdIsRunning  = false;
+    let _ktdMode       = 'chuaphancong'; // 'chuaphancong' hoặc 'dondi'
+
+    // ── Mode Switcher Events ──
+    ktdModeChuaPhanCong.addEventListener('click', () => {
+        if (_ktdIsRunning) return;
+        _ktdMode = 'chuaphancong';
+        ktdModeChuaPhanCong.classList.add('active');
+        ktdModeDonDi.classList.remove('active');
+        ktdModePhanCongTuyen.classList.remove('active');
+        ktdCpcInstructionsCard.style.display = 'block';
+        ktdExcelCard.style.display = 'none';
+        ktdPctCard.style.display = 'none';
+        ktdSectionTitleText.textContent = 'Kiểm tra đơn chưa phân công';
+        startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Quét';
+        startKtdBtn.disabled = false;
+        ktdResultsCard.style.display = 'none';
+        ktdProgressCard.style.display = 'none';
+        ktdStatusMsg.textContent = 'Sẵn sàng hoạt động';
+        ktdStatusDot.style.background = '#10B981';
+    });
+
+    ktdModeDonDi.addEventListener('click', () => {
+        if (_ktdIsRunning) return;
+        _ktdMode = 'dondi';
+        ktdModeDonDi.classList.add('active');
+        ktdModeChuaPhanCong.classList.remove('active');
+        ktdModePhanCongTuyen.classList.remove('active');
+        ktdExcelCard.style.display = 'block';
+        ktdCpcInstructionsCard.style.display = 'none';
+        ktdPctCard.style.display = 'none';
+        ktdSectionTitleText.textContent = 'Tra cứu hành trình đơn đi';
+        startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Kiểm Tra';
+        ktdResultsCard.style.display = 'none';
+        ktdProgressCard.style.display = 'none';
+        ktdUpdateBillCount();
+        if (_ktdBills.length === 0) {
+            ktdStatusMsg.textContent = 'Sẵn sàng — Hãy tải file Excel';
+            ktdStatusDot.style.background = '#f59e0b';
+        } else {
+            ktdStatusMsg.textContent = 'Sẵn sàng hoạt động';
+            ktdStatusDot.style.background = '#10B981';
+        }
+    });
+
+    // ════════════════════════════════════════
+    //  MODE: PHÂN CÔNG THEO TUYẾN
+    // ════════════════════════════════════════
+    const PHANCONG_URL = 'https://evtp2.viettelpost.vn/?uId=khai-thac-den/phan-cong-phat';
+
+    const pctDropzone        = document.getElementById('pctDropzone');
+    const pctFileInput       = document.getElementById('pctFileInput');
+    const pctDropzoneContent = document.getElementById('pctDropzoneContent');
+    const pctDropzoneLoaded  = document.getElementById('pctDropzoneLoaded');
+    const pctLoadedFileName  = document.getElementById('pctLoadedFileName');
+    const pctClearBtn        = document.getElementById('pctClearBtn');
+    const pctBillCount       = document.getElementById('pctBillCount');
+    const pctPreview         = document.getElementById('pctPreview');
+    const pctSummary         = document.getElementById('pctSummary');
+    const pctGroupList       = document.getElementById('pctGroupList');
+    const pctCheckBtn        = document.getElementById('pctCheckBtn');
+
+    let _pctGroups  = []; // [{ shortName, bills:[...], matchedRoute?, _matchStatus?, _matchList? }]
+    let _pctSkipped = 0;   // số dòng bỏ qua (chưa gán bưu tá)
+    let _pctAlias   = {};  // { tên_gõ_đã_chuẩn_hoá: 'HBCTVT ...' } — bộ nhớ alias lâu dài
+    let _pctRoutes  = [];  // danh sách tuyến đọc từ trang (phục vụ ô gõ-để-lọc)
+
+    // Nạp alias đã lưu (tự học qua các lần dùng)
+    chrome.storage.local.get('vtp_pc_alias', (d) => {
+        if (d.vtp_pc_alias && typeof d.vtp_pc_alias === 'object') _pctAlias = d.vtp_pc_alias;
+    });
+
+    ktdModePhanCongTuyen.addEventListener('click', () => {
+        if (_ktdIsRunning) return;
+        _ktdMode = 'phancongtuyen';
+        ktdModePhanCongTuyen.classList.add('active');
+        ktdModeChuaPhanCong.classList.remove('active');
+        ktdModeDonDi.classList.remove('active');
+        ktdPctCard.style.display = 'block';
+        ktdCpcInstructionsCard.style.display = 'none';
+        ktdExcelCard.style.display = 'none';
+        ktdSectionTitleText.textContent = 'Phân công đơn theo tuyến';
+        startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Phân Công';
+        startKtdBtn.disabled = _pctGroups.length === 0;
+        ktdResultsCard.style.display = 'none';
+        ktdProgressCard.style.display = 'none';
+        if (_pctGroups.length === 0) {
+            ktdStatusMsg.textContent = 'Sẵn sàng — Hãy tải file phân công';
+            ktdStatusDot.style.background = '#f59e0b';
+        } else {
+            ktdStatusMsg.textContent = 'Sẵn sàng hoạt động';
+            ktdStatusDot.style.background = '#10B981';
+        }
+    });
+
+    // ── Dropzone events ──
+    pctDropzone.addEventListener('click', (e) => {
+        if (e.target.closest('.loaded-file-clear')) return;
+        pctFileInput.click();
+    });
+    pctFileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) pctProcessExcel(e.target.files[0]);
+    });
+    pctDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        pctDropzone.classList.add('drag-over');
+    });
+    pctDropzone.addEventListener('dragleave', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        pctDropzone.classList.remove('drag-over');
+    });
+    pctDropzone.addEventListener('drop', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        pctDropzone.classList.remove('drag-over');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) pctProcessExcel(file);
+    });
+    pctClearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pctResetState();
+    });
+
+    function pctResetState() {
+        _pctGroups = [];
+        _pctSkipped = 0;
+        pctFileInput.value = '';
+        pctDropzoneContent.style.display = 'flex';
+        pctDropzoneLoaded.style.display  = 'none';
+        pctPreview.style.display = 'none';
+        pctGroupList.innerHTML = '';
+        pctUpdateCount();
+        startKtdBtn.disabled = true;
+    }
+
+    function pctUpdateCount() {
+        const totalBills = _pctGroups.reduce((s, g) => s + g.bills.length, 0);
+        pctBillCount.textContent = `${totalBills} mã`;
+        pctBillCount.classList.toggle('has-bills', totalBills > 0);
+    }
+
+    // ── Parse Excel — nhóm mã theo cột "Tên bưu tá" ──
+    function pctProcessExcel(file) {
+        const validExts = ['.xlsx', '.xls', '.csv'];
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        if (!validExts.includes(ext)) {
+            alert('Chỉ hỗ trợ file .xlsx, .xls hoặc .csv!');
+            return;
+        }
+
+        pctLoadedFileName.textContent    = file.name;
+        pctDropzoneContent.style.display = 'none';
+        pctDropzoneLoaded.style.display  = 'block';
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                if (rows.length < 2) {
+                    alert('File Excel không có dữ liệu!');
+                    pctResetState();
+                    return;
+                }
+
+                const headers = rows[0].map(h => String(h || '').trim());
+                const buuTaIdx = headers.indexOf('Tên bưu tá');
+                const maIdx    = headers.indexOf('Mã phiếu gửi');
+
+                if (buuTaIdx < 0) {
+                    alert('Không tìm thấy cột "Tên bưu tá"!\n\nCác cột hiện có: ' + headers.join(', '));
+                    pctResetState();
+                    return;
+                }
+                if (maIdx < 0) {
+                    alert('Không tìm thấy cột "Mã phiếu gửi"!\n\nCác cột hiện có: ' + headers.join(', '));
+                    pctResetState();
+                    return;
+                }
+
+                // Gom theo tên bưu tá (bỏ dòng chưa điền tên)
+                const groups = {};
+                let totalBills = 0;
+                let skipped = 0;
+                for (let i = 1; i < rows.length; i++) {
+                    const row  = rows[i];
+                    const name = String(row[buuTaIdx] || '').trim();
+                    const code = String(row[maIdx] || '').trim();
+                    if (!code) continue;
+                    if (!name) { skipped++; continue; } // chưa gán bưu tá → bỏ qua
+                    if (!groups[name]) groups[name] = [];
+                    if (!groups[name].includes(code)) {
+                        groups[name].push(code);
+                        totalBills++;
+                    }
+                }
+
+                _pctGroups = Object.entries(groups).map(([shortName, bills]) => ({ shortName, bills }));
+
+                if (_pctGroups.length === 0) {
+                    alert('Không có dòng nào đã điền "Tên bưu tá"!\nHãy điền cột Tên bưu tá trước khi tải lên.');
+                    pctResetState();
+                    return;
+                }
+
+                _pctSkipped = skipped;
+                pctRenderPreview();
+                pctUpdateCount();
+                startKtdBtn.disabled = false;
+                ktdStatusMsg.textContent = 'Sẵn sàng hoạt động';
+                ktdStatusDot.style.background = '#10B981';
+                console.log(`[VTP PhânCông] Đọc ${totalBills} mã / ${_pctGroups.length} bưu tá (bỏ qua ${skipped} dòng chưa gán).`);
+
+            } catch (err) {
+                console.error('[VTP PhânCông] Lỗi đọc file:', err);
+                alert('Lỗi đọc file Excel: ' + err.message);
+                pctResetState();
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function pctRenderPreview() {
+        pctPreview.style.display = 'block';
+        const totalBills = _pctGroups.reduce((s, g) => s + g.bills.length, 0);
+        let summary = `${_pctGroups.length} bưu tá · ${totalBills} mã`
+            + (_pctSkipped ? ` · bỏ qua ${_pctSkipped} dòng chưa gán` : '');
+
+        const checked = _pctGroups.some(g => g._matchStatus);
+        if (checked) {
+            const ok   = _pctGroups.filter(g => g._matchStatus === 'ok').length;
+            const warn = _pctGroups.filter(g => g._matchStatus === 'warn').length;
+            const fail = _pctGroups.filter(g => g._matchStatus === 'fail').length;
+            summary += `  —  ✓ ${ok}   ⚠️ ${warn}   ❌ ${fail}`;
+        }
+        pctSummary.textContent = summary;
+
+        pctGroupList.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        // Đưa các mục cần xử lý (❌ rồi ⚠️) lên đầu cho dễ thấy
+        const rank = s => (s === 'fail' ? 0 : s === 'warn' ? 1 : 2);
+        _pctGroups
+            .slice()
+            .sort((a, b) => {
+                const r = rank(a._matchStatus) - rank(b._matchStatus);
+                return r !== 0 ? r : b.bills.length - a.bills.length;
+            })
+            .forEach(g => frag.appendChild(pctBuildGroupItem(g)));
+        pctGroupList.appendChild(frag);
+    }
+
+    // ── Dựng 1 dòng bưu tá + khu xử lý ⚠️/❌ (dùng textContent → an toàn XSS) ──
+    function pctBuildGroupItem(g) {
+        const wrap = document.createElement('div');
+        wrap.className = 'customer-item';
+        wrap.style.flexDirection = 'column';
+        wrap.style.alignItems = 'stretch';
+        if (g._matchStatus === 'ok')   wrap.style.borderColor = 'var(--green)';
+        if (g._matchStatus === 'warn') wrap.style.borderColor = 'var(--amber)';
+        if (g._matchStatus === 'fail') wrap.style.borderColor = 'var(--red)';
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
+        const info = document.createElement('div');
+        info.className = 'customer-info';
+        info.style.flex = '1';
+        const n = document.createElement('div');
+        n.className = 'customer-name';
+        n.textContent = g.shortName;
+        const m = document.createElement('div');
+        m.className = 'customer-meta';
+        if (g._matchStatus === 'ok') {
+            m.textContent = `${g.bills.length} mã → ${g.matchedRoute}`;
+            m.style.color = 'var(--green)';
+        } else if (g._matchStatus === 'warn') {
+            m.textContent = `${g.bills.length} mã · ⚠️ chọn đúng tuyến:`;
+            m.style.color = 'var(--amber)';
+        } else if (g._matchStatus === 'fail') {
+            m.textContent = `${g.bills.length} mã · ❌ chưa khớp — gõ tìm tuyến:`;
+            m.style.color = 'var(--red)';
+        } else {
+            m.textContent = `${g.bills.length} mã`;
+        }
+        info.appendChild(n);
+        info.appendChild(m);
+        const badge = document.createElement('span');
+        badge.className = 'customer-count-badge';
+        badge.textContent = g.bills.length;
+        row.appendChild(info);
+        row.appendChild(badge);
+        wrap.appendChild(row);
+
+        // ⚠️ khớp nhiều tuyến → chỉ hiện ĐÚNG các ứng viên đã khớp (2–3 nút)
+        if (g._matchStatus === 'warn') {
+            const box = document.createElement('div');
+            box.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;';
+            (g._matchList || []).forEach(rt => {
+                box.appendChild(pctMakeButton(rt, 'var(--amber)', () => pctResolveGroup(g, rt)));
+            });
+            wrap.appendChild(box);
+        }
+        // ❌ không khớp → ô gõ-để-lọc trong TOÀN BỘ tuyến (không hiện dropdown dài)
+        else if (g._matchStatus === 'fail') {
+            wrap.appendChild(pctBuildSearchBox(g));
+        }
+        return wrap;
+    }
+
+    function pctMakeButton(label, borderColor, onClick) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = label;
+        b.style.cssText = `text-align:left;padding:5px 10px;border:1px solid ${borderColor};`
+            + 'background:var(--white);color:var(--tx-primary);border-radius:8px;font-size:11.5px;cursor:pointer;';
+        b.addEventListener('click', onClick);
+        return b;
+    }
+
+    function pctBuildSearchBox(g) {
+        const box = document.createElement('div');
+        box.style.cssText = 'margin-top:6px;';
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.placeholder = 'Gõ vài ký tự để tìm bưu tá…';
+        inp.style.cssText = 'width:100%;padding:6px 8px;border:1px solid var(--red);border-radius:6px;font-size:12px;box-sizing:border-box;';
+        const results = document.createElement('div');
+        results.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:150px;overflow-y:auto;';
+        const render = () => {
+            const q = pctFold(inp.value);
+            results.innerHTML = '';
+            if (!q) return;
+            const found = _pctRoutes.filter(r => pctFold(r).includes(q)).slice(0, 8);
+            if (found.length === 0) {
+                const e = document.createElement('div');
+                e.textContent = 'Không tìm thấy';
+                e.style.cssText = 'font-size:11px;color:var(--tx-muted);padding:4px;';
+                results.appendChild(e);
+                return;
+            }
+            found.forEach(rt => results.appendChild(
+                pctMakeButton(rt, 'var(--border)', () => pctResolveGroup(g, rt))
+            ));
+        };
+        inp.addEventListener('input', render);
+        box.appendChild(inp);
+        box.appendChild(results);
+        return box;
+    }
+
+    // ── Người dùng chốt tuyến cho 1 bưu tá → lưu alias + re-render ──
+    function pctResolveGroup(g, route) {
+        g.matchedRoute = route;
+        g._matchStatus = 'ok';
+        g._matchList = [route];
+        pctSaveAlias(g.shortName, route);
+        pctRenderPreview();
+        const fail = _pctGroups.filter(x => x._matchStatus === 'fail').length;
+        const warn = _pctGroups.filter(x => x._matchStatus === 'warn').length;
+        if (fail === 0 && warn === 0) {
+            ktdStatusMsg.textContent = `✅ Đã khớp đủ ${_pctGroups.length} bưu tá — sẵn sàng phân công.`;
+            ktdStatusDot.style.background = '#10B981';
+        }
+    }
+
+    // ── Chuẩn hoá & khớp tên (có bỏ dấu + alias tự học) ──
+    function pctNormName(s) {
+        return (s || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+    function pctStripDiacritics(s) {
+        return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd').replace(/Đ/g, 'd');
+    }
+    function pctFold(s) { return pctStripDiacritics(pctNormName(s)); } // lowercase + bỏ dấu
+
+    function pctSaveAlias(name, route) {
+        const key = pctNormName(name);
+        if (!key || !route) return;
+        _pctAlias[key] = route;
+        try { chrome.storage.local.set({ vtp_pc_alias: _pctAlias }); } catch (_) {}
+    }
+
+    // Khớp 1 bưu tá → { status:'ok'|'warn'|'fail', route, list, learn }
+    function pctMatchGroup(routes, shortName) {
+        const key = pctNormName(shortName);
+        if (!key) return { status: 'fail', route: null, list: [] };
+
+        // 1) Alias đã nhớ (và tuyến vẫn còn trên trang)
+        if (_pctAlias[key] && routes.includes(_pctAlias[key])) {
+            return { status: 'ok', route: _pctAlias[key], list: [_pctAlias[key]] };
+        }
+        // 2) Khớp còn dấu theo từ cuối
+        let m = routes.filter(r => {
+            const f = pctNormName(r);
+            return f === key || f.endsWith(' ' + key);
+        });
+        if (m.length === 1) return { status: 'ok', route: m[0], list: m, learn: true };
+        if (m.length > 1)  return { status: 'warn', route: null, list: m };
+        // 3) Khớp bỏ dấu theo từ cuối (bắt trường hợp gõ thiếu dấu)
+        const fk = pctFold(shortName);
+        m = routes.filter(r => {
+            const f = pctFold(r);
+            return f === fk || f.endsWith(' ' + fk);
+        });
+        if (m.length === 1) return { status: 'ok', route: m[0], list: m, learn: true };
+        if (m.length > 1)  return { status: 'warn', route: null, list: m };
+        return { status: 'fail', route: null, list: [] };
+    }
+
+    // ── Đọc danh sách tuyến (combobox "Chọn tuyến NVBH") từ trang phân công ──
+    async function pctReadRoutesFromPage(tabId) {
+        try {
+            const res = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: () => {
+                    const norm = s => (s || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+                    const set = new Set();
+                    document.querySelectorAll('.z-combobox').forEach(cb => {
+                        const inp = cb.querySelector('.z-combobox-input');
+                        const ph = inp ? (inp.getAttribute('placeholder') || '') : '';
+                        if (ph.includes('Chọn tuyến')) {
+                            cb.querySelectorAll('.z-comboitem-text').forEach(el => {
+                                const t = norm(el.textContent);
+                                if (t) set.add(t);
+                            });
+                        }
+                    });
+                    return Array.from(set);
+                }
+            });
+            return res?.[0]?.result || [];
+        } catch (_) {
+            return [];
+        }
+    }
+
+    // ── Đối chiếu tên bưu tá ↔ tuyến (bấm nút) ──
+    async function pctRunCheck() {
+        if (_pctGroups.length === 0) { alert('Hãy tải file phân công trước!'); return; }
+
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) { alert('Không tìm thấy tab trình duyệt!'); return; }
+
+        pctCheckBtn.disabled = true;
+        const oldHtml = pctCheckBtn.innerHTML;
+        pctCheckBtn.innerHTML = '<i class="bi bi-arrow-repeat spin" style="font-size: 14px;"></i> Đang đọc tuyến…';
+
+        // Mở trang phân công nếu chưa ở đó
+        if (!tab.url?.includes('khai-thac-den/phan-cong-phat')) {
+            const navP = waitForPcTabReload(tab.id, 45000);
+            await chrome.tabs.update(tab.id, { url: PHANCONG_URL });
+            await navP;
+            await new Promise(r => setTimeout(r, 2000));
+            tab = await chrome.tabs.get(tab.id);
+        }
+        // Chờ trang sẵn sàng rồi đọc tuyến
+        await waitForPcPageReady(tab.id, 30000);
+        const routes = await pctReadRoutesFromPage(tab.id);
+
+        pctCheckBtn.disabled = false;
+        pctCheckBtn.innerHTML = oldHtml;
+
+        if (routes.length === 0) {
+            alert('Không đọc được danh sách tuyến. Đảm bảo đang ở trang "Phân công phát" và trang đã tải xong.');
+            return;
+        }
+
+        _pctRoutes = routes; // lưu cho ô gõ-để-lọc
+
+        // Khớp từng bưu tá (alias → còn dấu → bỏ dấu); tự học khi khớp duy nhất
+        _pctGroups.forEach(g => {
+            const res = pctMatchGroup(routes, g.shortName);
+            g._matchStatus = res.status;
+            g._matchList   = res.list;
+            g.matchedRoute = res.route;
+            if (res.status === 'ok' && res.learn) pctSaveAlias(g.shortName, res.route);
+        });
+
+        pctRenderPreview();
+
+        const fail = _pctGroups.filter(g => g._matchStatus === 'fail').length;
+        const warn = _pctGroups.filter(g => g._matchStatus === 'warn').length;
+        if (fail === 0 && warn === 0) {
+            ktdStatusMsg.textContent = `✅ Đối chiếu xong — tất cả ${_pctGroups.length} bưu tá khớp tuyến.`;
+            ktdStatusDot.style.background = '#10B981';
+        } else {
+            ktdStatusMsg.textContent = `⚠️ Đối chiếu: ${warn} cảnh báo, ${fail} không tìm thấy — nên sửa file trước khi chạy.`;
+            ktdStatusDot.style.background = '#f59e0b';
+        }
+    }
+
+    pctCheckBtn.addEventListener('click', pctRunCheck);
+
+    // ── Helper: chờ content script phân công báo xong 1 BƯU TÁ ──
+    function waitForPhanCongStepDone(timeoutMs = 660000) { // 11 phút
+        return new Promise((resolve) => {
+            let resolved = false;
+            const deadline = setTimeout(() => {
+                if (resolved) return;
+                resolved = true;
+                chrome.storage.onChanged.removeListener(listener);
+                resolve({ status: 'timeout' });
+            }, timeoutMs);
+
+            function listener(changes, ns) {
+                if (ns !== 'local' || resolved) return;
+                if (changes.__VTP_PHANCONG_PROGRESS__?.newValue) {
+                    pctRenderProgress(changes.__VTP_PHANCONG_PROGRESS__.newValue);
+                }
+                if (changes.__VTP_PHANCONG_STEP_DONE__?.newValue) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(changes.__VTP_PHANCONG_STEP_DONE__.newValue);
+                }
+            }
+            chrome.storage.onChanged.addListener(listener);
+
+            chrome.storage.local.get('__VTP_PHANCONG_STEP_DONE__', (d) => {
+                if (d.__VTP_PHANCONG_STEP_DONE__ && !resolved) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(d.__VTP_PHANCONG_STEP_DONE__);
+                }
+            });
+        });
+    }
+
+    // ── Helper: chờ trang phân công sẵn sàng (nút "Thêm mới" hiển thị, hết loading) ──
+    function waitForPcPageReady(tabId, timeoutMs = 45000) {
+        return new Promise((resolve) => {
+            const start = Date.now();
+            const poller = setInterval(async () => {
+                try {
+                    const res = await chrome.scripting.executeScript({
+                        target: { tabId },
+                        func: () => {
+                            const norm = s => (s || '').replace(/\u00A0/g, ' ').replace(/\s+/g, ' ').trim();
+                            const hasThemMoi = Array.from(document.querySelectorAll('button.z-button'))
+                                .some(b => norm(b.textContent) === 'Thêm mới' && b.offsetParent !== null);
+                            const loading = document.querySelector('.z-loading-indicator, .z-apply-loading-indicator');
+                            const isLoading = loading && loading.style.display !== 'none' && loading.offsetParent !== null;
+                            return hasThemMoi && !isLoading;
+                        }
+                    });
+                    if (res?.[0]?.result === true) { clearInterval(poller); resolve(true); }
+                    else if (Date.now() - start >= timeoutMs) { clearInterval(poller); resolve(false); }
+                } catch (_) {
+                    if (Date.now() - start >= timeoutMs) { clearInterval(poller); resolve(false); }
+                }
+            }, 700);
+        });
+    }
+
+    // ── Helper: chờ tab reload hoàn tất ──
+    function waitForPcTabReload(tabId, timeoutMs = 30000) {
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve(false);
+            }, timeoutMs);
+            const listener = (tid, changeInfo) => {
+                if (tid !== tabId || changeInfo.status !== 'complete') return;
+                clearTimeout(timer);
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve(true);
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+        });
+    }
+
+    function pctRenderProgress(p) {
+        if (!p) return;
+        const total = p.total || _pctGroups.length;
+        let msg = `[${(p.current || 0) + 1}/${total}] ${p.postman || ''} — ${p.phase || ''}`;
+        if (p.phase === 'Quét mã' && p.totalBills) {
+            msg += ` (${p.scanned || 0}/${p.totalBills})`;
+        }
+        ktdStatusMsg.textContent = msg;
+        ktdStatusDot.style.background = '#f59e0b';
+    }
+
+    // ── Báo cáo cuối phiên: gom mã quét lỗi theo từng bưu tá ──
+    function pctRenderRunReport() {
+        pctPreview.style.display = 'block';
+        const totalBills   = _pctGroups.reduce((s, g) => s + g.bills.length, 0);
+        const totalScanned = _pctGroups.reduce((s, g) => s + ((g._runScanned) || 0), 0);
+        const totalFailed  = _pctGroups.reduce((s, g) => s + ((g._runFailed?.length) || 0), 0);
+        pctSummary.textContent = `Kết quả: đã quét ${totalScanned}/${totalBills} mã · ${totalFailed} mã lỗi`;
+
+        pctGroupList.innerHTML = '';
+
+        // Nút copy toàn bộ mã lỗi (kèm tên bưu tá) nếu có
+        if (totalFailed > 0) {
+            const allFailed = _pctGroups.flatMap(g => (g._runFailed || []).map(c => `${g.shortName}\t${c}`));
+            const copyAll = pctMakeButton(`📋 Copy tất cả ${totalFailed} mã lỗi`, 'var(--red)', () => {
+                if (navigator.clipboard?.writeText) {
+                    navigator.clipboard.writeText(allFailed.join('\n'))
+                        .then(() => { copyAll.textContent = '✓ Đã copy vào clipboard'; })
+                        .catch(() => {});
+                }
+            });
+            copyAll.style.marginBottom = '6px';
+            pctGroupList.appendChild(copyAll);
+        }
+
+        const frag = document.createDocumentFragment();
+        // Nhóm có lỗi hiển thị lên trước
+        _pctGroups
+            .slice()
+            .sort((a, b) => ((b._runFailed?.length) || 0) - ((a._runFailed?.length) || 0))
+            .forEach(g => frag.appendChild(pctBuildReportItem(g)));
+        pctGroupList.appendChild(frag);
+    }
+
+    function pctBuildReportItem(g) {
+        const failed = g._runFailed || [];
+        const wrap = document.createElement('div');
+        wrap.className = 'customer-item';
+        wrap.style.flexDirection = 'column';
+        wrap.style.alignItems = 'stretch';
+        if (g._runStatus === 'error') wrap.style.borderColor = 'var(--red)';
+        else if (failed.length > 0)   wrap.style.borderColor = 'var(--amber)';
+        else                          wrap.style.borderColor = 'var(--green)';
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;';
+        const info = document.createElement('div');
+        info.className = 'customer-info';
+        info.style.flex = '1';
+        const n = document.createElement('div');
+        n.className = 'customer-name';
+        n.textContent = g.shortName + (g.matchedRoute ? ` → ${g.matchedRoute}` : '');
+        const m = document.createElement('div');
+        m.className = 'customer-meta';
+        if (g._runStatus === 'error') {
+            m.textContent = `❌ Lỗi: ${g._runReason || 'không xác định'} (0/${g._runTotal || g.bills.length})`;
+            m.style.color = 'var(--red)';
+        } else if (failed.length > 0) {
+            m.textContent = `⚠️ ${g._runScanned}/${g._runTotal} mã vào · ${failed.length} mã lỗi`;
+            m.style.color = 'var(--amber)';
+        } else {
+            m.textContent = `✅ ${g._runScanned}/${g._runTotal} mã — đủ`;
+            m.style.color = 'var(--green)';
+        }
+        info.appendChild(n);
+        info.appendChild(m);
+        const badge = document.createElement('span');
+        badge.className = 'customer-count-badge';
+        badge.textContent = failed.length ? `${failed.length} lỗi` : '✓';
+        row.appendChild(info);
+        row.appendChild(badge);
+        wrap.appendChild(row);
+
+        // Danh sách mã lỗi (chip monospace) — dùng textContent, an toàn XSS
+        if (failed.length > 0) {
+            const box = document.createElement('div');
+            box.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-top:6px;';
+            failed.forEach(code => {
+                const chip = document.createElement('span');
+                chip.textContent = code;
+                chip.style.cssText = 'font-family:Consolas,monospace;font-size:11px;padding:2px 6px;'
+                    + 'background:var(--red-pale);color:var(--red);border:1px solid var(--red-border);border-radius:4px;';
+                box.appendChild(chip);
+            });
+            wrap.appendChild(box);
+        }
+        return wrap;
+    }
+
+    // 🚀 CHẠY PHÂN CÔNG TỰ ĐỘNG — sidepanel điều phối, 1 bưu tá/lần + reload
+    async function runKtdPhanCongTuyen() {
+        if (_pctGroups.length === 0) {
+            alert('Vui lòng tải file phân công (đã điền cột Tên bưu tá)!');
+            return;
+        }
+
+        const totalBills = _pctGroups.reduce((s, g) => s + g.bills.length, 0);
+        const problems = _pctGroups.filter(g => g._matchStatus === 'fail' || g._matchStatus === 'warn');
+        let warnLine = '';
+        if (problems.length > 0) {
+            warnLine = `\n⚠️ CẢNH BÁO: ${problems.length} bưu tá chưa khớp tuyến chắc chắn `
+                + `(${problems.map(g => g.shortName).join(', ')}). Nên bấm "Đối chiếu" và sửa file trước.\n`;
+        }
+        const ok = confirm(
+            `Phân công ${totalBills} mã cho ${_pctGroups.length} bưu tá?\n${warnLine}\n` +
+            _pctGroups.map(g => `• ${g.shortName}: ${g.bills.length} mã`).join('\n') +
+            `\n\nKhông thao tác chuột/bàn phím khi tool đang chạy.`
+        );
+        if (!ok) return;
+
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) { alert('Không tìm thấy tab trình duyệt!'); return; }
+
+        _ktdIsRunning = true;
+        startKtdBtn.disabled = true;
+        startKtdBtn.innerHTML = '<i class="bi bi-arrow-repeat spin" style="font-size: 14px;"></i> Đang phân công…';
+        ktdProgressCard.style.display = 'block';
+        ktdProgressBar.style.width = '0%';
+        ktdProgressText.textContent = `0 / ${_pctGroups.length} bưu tá`;
+        ktdResultsCard.style.display = 'none';
+        ktdStatusMsg.textContent = 'Đang mở trang phân công phát…';
+        ktdStatusDot.style.background = '#f59e0b';
+
+        // Điều hướng tới trang phân công phát nếu chưa ở đó
+        if (!tab.url?.includes('khai-thac-den/phan-cong-phat')) {
+            const navP = waitForPcTabReload(tab.id, 45000);
+            await chrome.tabs.update(tab.id, { url: PHANCONG_URL });
+            await navP;
+            await new Promise(r => setTimeout(r, 2000)); // chờ ZK render
+            tab = await chrome.tabs.get(tab.id);
+        }
+        const mainTabId = tab.id;
+
+        // Dọn tín hiệu cũ
+        try {
+            await chrome.storage.local.remove([
+                '__VTP_PHANCONG_STEP_DONE__', '__VTP_PHANCONG_PROGRESS__',
+                '__VTP_PHANCONG_CANCEL__', '__VTP_PHANCONG_CURRENT__'
+            ]);
+        } catch (_) {}
+
+        const assigned = [];
+        const errors = [];
+        const total = _pctGroups.length;
+
+        // Dọn kết quả phiên trước (nếu chạy lại)
+        _pctGroups.forEach(g => {
+            delete g._runStatus; delete g._runScanned;
+            delete g._runTotal;  delete g._runFailed; delete g._runReason;
+        });
+
+        // ── Vòng lặp từng bưu tá ──
+        for (let i = 0; i < total; i++) {
+            if (!_ktdIsRunning) break;
+            const g = _pctGroups[i];
+
+            ktdProgressBar.style.width = Math.round((i / total) * 100) + '%';
+            ktdProgressText.textContent = `${i} / ${total} bưu tá`;
+            ktdStatusMsg.textContent = `[${i + 1}/${total}] ${g.shortName}: chuẩn bị…`;
+
+            // Chờ trang sẵn sàng (form phân công)
+            const ready = await waitForPcPageReady(mainTabId, 45000);
+            if (!ready) {
+                errors.push({ shortName: g.shortName, reason: 'Trang phân công không sẵn sàng (timeout)' });
+                continue;
+            }
+
+            // Nạp bưu tá hiện tại + đăng ký chờ xong TRƯỚC khi inject
+            try { await chrome.storage.local.remove('__VTP_PHANCONG_STEP_DONE__'); } catch (_) {}
+            await chrome.storage.local.set({ __VTP_PHANCONG_CURRENT__: { group: g, index: i, total } });
+            const stepPromise = waitForPhanCongStepDone(660000);
+
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: mainTabId },
+                    files: ['src/shared/notification.js', 'src/modules/donchpc/phancong_content.js']
+                });
+            } catch (e) {
+                console.error('[VTP PhânCông] Inject thất bại:', e);
+                errors.push({ shortName: g.shortName, reason: 'Inject lỗi: ' + e.message });
+                continue;
+            }
+
+            const res = await stepPromise;
+            if (res.status === 'done') {
+                assigned.push(res);
+                g._runStatus  = 'done';
+                g._runScanned = res.scanned || 0;
+                g._runTotal   = res.totalBills || g.bills.length;
+                g._runFailed  = res.failedCodes || [];
+                console.log(`[VTP PhânCông] ✅ ${g.shortName} → ${res.route} (${res.scanned}/${res.totalBills} mã, lỗi ${g._runFailed.length})`);
+            } else {
+                errors.push({ shortName: res.shortName || g.shortName, reason: res.reason || 'Lỗi/timeout' });
+                g._runStatus  = 'error';
+                g._runScanned = 0;
+                g._runTotal   = g.bills.length;
+                g._runFailed  = g.bills.slice(); // cả nhóm coi như chưa vào
+                g._runReason  = res.reason || 'Lỗi/timeout';
+                console.warn(`[VTP PhânCông] ❌ ${g.shortName}:`, res.reason);
+            }
+
+            ktdProgressBar.style.width = Math.round(((i + 1) / total) * 100) + '%';
+            ktdProgressText.textContent = `${i + 1} / ${total} bưu tá`;
+
+            // Reload trang để về trạng thái sạch cho bưu tá kế tiếp (trừ bưu tá cuối)
+            if (i < total - 1 && _ktdIsRunning) {
+                ktdStatusMsg.textContent = `[${i + 1}/${total}] Xong ${g.shortName} — tải lại trang…`;
+                try {
+                    const reloadP = waitForPcTabReload(mainTabId, 30000);
+                    await chrome.scripting.executeScript({
+                        target: { tabId: mainTabId }, func: () => location.reload()
+                    });
+                    await reloadP;
+                } catch (_) {}
+                await new Promise(r => setTimeout(r, 800));
+            }
+        }
+
+        // ── Hoàn tất ──
+        _ktdIsRunning = false;
+        startKtdBtn.disabled = false;
+        startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Phân Công';
+        ktdProgressBar.style.width = '100%';
+
+        const totalFailed = _pctGroups.reduce((s, g) => s + ((g._runFailed?.length) || 0), 0);
+
+        if (errors.length === 0 && totalFailed === 0) {
+            ktdStatusMsg.textContent = `✅ Hoàn tất! Đã phân công ${assigned.length} bưu tá, không có mã lỗi.`;
+            ktdStatusDot.style.background = '#10B981';
+        } else {
+            ktdStatusMsg.textContent = `⚠️ Xong ${assigned.length} bưu tá · ${totalFailed} mã lỗi`
+                + (errors.length ? ` · ${errors.length} bưu tá lỗi` : '') + ' — xem báo cáo bên dưới.';
+            ktdStatusDot.style.background = '#f59e0b';
+            console.warn('[VTP PhânCông] Lỗi bưu tá:', errors);
+        }
+
+        // Hiện báo cáo chi tiết (gom mã lỗi theo bưu tá)
+        pctRenderRunReport();
+
+        try {
+            await chrome.storage.local.remove([
+                '__VTP_PHANCONG_CURRENT__', '__VTP_PHANCONG_PROGRESS__', '__VTP_PHANCONG_STEP_DONE__'
+            ]);
+        } catch (_) {}
+    }
+
+    // ── Excel Upload events ──
+    ktdDropzone.addEventListener('click', (e) => {
+        if (e.target.closest('.loaded-file-clear')) return;
+        ktdFileInput.click();
+    });
+    ktdFileInput.addEventListener('change', (e) => {
+        if (e.target.files[0]) ktdProcessExcel(e.target.files[0]);
+    });
+    ktdDropzone.addEventListener('dragover', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        ktdDropzone.classList.add('drag-over');
+    });
+    ktdDropzone.addEventListener('dragleave', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        ktdDropzone.classList.remove('drag-over');
+    });
+    ktdDropzone.addEventListener('drop', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        ktdDropzone.classList.remove('drag-over');
+        const file = e.dataTransfer?.files?.[0];
+        if (file) ktdProcessExcel(file);
+    });
+
+    ktdClearBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        ktdResetState();
+    });
+
+    function ktdResetState() {
+        _ktdExcelData = {};
+        _ktdBills     = [];
+        ktdFileInput.value = '';
+        ktdDropzoneContent.style.display = 'flex';
+        ktdDropzoneLoaded.style.display  = 'none';
+        ktdCustomerSection.style.display = 'none';
+        ktdSelectedBills.style.display   = 'none';
+        ktdCustomerList.style.display    = 'flex';
+        ktdCustomerSearch.value          = '';
+        ktdClearSearch.style.display     = 'none';
+        ktdUpdateBillCount();
+        startKtdBtn.disabled = true;
+    }
+
+    function ktdUpdateBillCount() {
+        const count = _ktdBills.length;
+        ktdBillCountEl.textContent = `${count} mã`;
+        ktdBillCountEl.classList.toggle('has-bills', count > 0);
+        startKtdBtn.disabled = count === 0;
+    }
+
+    // ── Parse Excel — Group by Mã khách hàng ──
+    function ktdProcessExcel(file) {
+        const validExts = ['.xlsx', '.xls', '.csv'];
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        if (!validExts.includes(ext)) {
+            alert('Chỉ hỗ trợ file .xlsx, .xls hoặc .csv!');
+            return;
+        }
+
+        ktdLoadedFileName.textContent    = file.name;
+        ktdDropzoneContent.style.display = 'none';
+        ktdDropzoneLoaded.style.display  = 'block';
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                if (rows.length < 2) {
+                    alert('File Excel không có dữ liệu!');
+                    ktdResetState();
+                    return;
+                }
+
+                const headers = rows[0].map(h => String(h || '').trim());
+                const maPhieuIdx = headers.indexOf('Mã phiếu gửi');
+                const maKHIdx    = headers.indexOf('Mã khách hàng');
+
+                if (maPhieuIdx < 0) {
+                    alert('Không tìm thấy cột "Mã phiếu gửi" trong file!\n\nCác cột hiện có: ' + headers.join(', '));
+                    ktdResetState();
+                    return;
+                }
+                if (maKHIdx < 0) {
+                    alert('Không tìm thấy cột "Mã khách hàng" trong file!\n\nCác cột hiện có: ' + headers.join(', '));
+                    ktdResetState();
+                    return;
+                }
+
+                // Group by Mã khách hàng, deduplicate Mã phiếu gửi
+                const groups = {};
+                let totalBills = 0;
+                for (let i = 1; i < rows.length; i++) {
+                    const row  = rows[i];
+                    const maKH = String(row[maKHIdx] || '').trim();
+                    const code = String(row[maPhieuIdx] || '').trim();
+                    if (!maKH || !code) continue;
+                    if (!groups[maKH]) groups[maKH] = [];
+                    if (!groups[maKH].includes(code)) {
+                        groups[maKH].push(code);
+                        totalBills++;
+                    }
+                }
+
+                if (Object.keys(groups).length === 0) {
+                    alert('Không tìm thấy dữ liệu hợp lệ trong file!');
+                    ktdResetState();
+                    return;
+                }
+
+                _ktdExcelData = groups;
+                _ktdBills     = [];
+                ktdCustomerSection.style.display = 'block';
+                ktdRenderCustomerList('');
+
+                console.log(`[VTP KTĐ] Đã đọc ${totalBills} đơn từ ${Object.keys(groups).length} khách hàng`);
+                ktdUpdateBillCount();
+
+            } catch (err) {
+                console.error('[VTP KTĐ] Lỗi đọc file:', err);
+                alert('Lỗi đọc file Excel: ' + err.message);
+                ktdResetState();
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    // ── Customer list render ──
+    function ktdRenderCustomerList(filter) {
+        ktdCustomerList.innerHTML = '';
+        ktdSelectedBills.style.display = 'none';
+        ktdCustomerList.style.display  = 'flex';
+
+        const entries = Object.entries(_ktdExcelData);
+        const totalCustomers = entries.length;
+        const totalBills = entries.reduce((sum, [_, codes]) => sum + codes.length, 0);
+
+        const normalFilter = filter.toLowerCase().trim();
+        const filtered = normalFilter
+            ? entries.filter(([maKH]) => maKH.toLowerCase().includes(normalFilter))
+            : entries;
+
+        filtered.sort((a, b) => b[1].length - a[1].length);
+
+        // Summary
+        const summaryEl = ktdCustomerSummary.querySelector('.summary-total');
+        if (normalFilter) {
+            summaryEl.textContent = `Tìm thấy ${filtered.length}/${totalCustomers} KH · ${totalBills} đơn tổng`;
+        } else {
+            summaryEl.textContent = `${totalCustomers} mã khách hàng · ${totalBills} đơn`;
+        }
+
+        if (filtered.length === 0) {
+            ktdCustomerList.innerHTML = `
+                <div class="empty-state" style="padding:16px 0">
+                    <p class="empty-title">Không tìm thấy mã khách hàng</p>
+                    <p class="empty-hint">Thử từ khóa khác</p>
+                </div>`;
+            return;
+        }
+
+        // "All" option
+        const allItem = document.createElement('div');
+        allItem.className = 'customer-item';
+        allItem.style.background = 'linear-gradient(135deg, var(--green-bg) 0%, var(--green-pale) 100%)';
+        allItem.style.borderColor = 'var(--green)';
+        const allCount = filtered.reduce((s, [_, c]) => s + c.length, 0);
+        allItem.innerHTML = `
+            <div class="customer-avatar" style="background:linear-gradient(135deg,var(--green),#059669);color:white;border-color:var(--green);">
+                <i class="bi bi-people-fill" style="font-size: 13px;"></i>
+            </div>
+            <div class="customer-info">
+                <div class="customer-name" style="color:var(--green);font-weight:700">TẤT CẢ KHÁCH HÀNG</div>
+                <div class="customer-meta">${filtered.length} KH · ${allCount} đơn</div>
+            </div>
+            <span class="customer-count-badge" style="background:var(--green-bg);color:var(--green);border-color:var(--green-pale);">${allCount}</span>
+            <svg class="customer-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
+                <polyline points="7 4 13 10 7 16"/>
+            </svg>`;
+        allItem.addEventListener('click', () => {
+            _ktdBills = filtered.flatMap(([_, codes]) => codes);
+            ktdShowSelectedBills('TẤT CẢ KHÁCH HÀNG', _ktdBills);
+        });
+        ktdCustomerList.appendChild(allItem);
+
+        // Individual customers
+        const frag = document.createDocumentFragment();
+        filtered.forEach(([maKH, codes]) => {
+            const item = document.createElement('div');
+            item.className = 'customer-item';
+            item.innerHTML = `
+                <div class="customer-avatar">${maKH.slice(-2).toUpperCase()}</div>
+                <div class="customer-info">
+                    <div class="customer-name">${maKH}</div>
+                    <div class="customer-meta">${codes.length} đơn hàng</div>
+                </div>
+                <span class="customer-count-badge">${codes.length}</span>
+                <svg class="customer-arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" width="12" height="12">
+                    <polyline points="7 4 13 10 7 16"/>
+                </svg>`;
+            item.addEventListener('click', () => {
+                _ktdBills = codes.slice();
+                ktdShowSelectedBills(maKH, codes);
+            });
+            frag.appendChild(item);
+        });
+        ktdCustomerList.appendChild(frag);
+    }
+
+    function ktdShowSelectedBills(name, bills) {
+        ktdCustomerList.style.display  = 'none';
+        ktdSelectedBills.style.display = 'block';
+        ktdSelectedName.textContent    = `${name} (${bills.length} đơn)`;
+
+        ktdSelectedList.innerHTML = '';
+        const frag = document.createDocumentFragment();
+        bills.forEach((code, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'bill-chip';
+            chip.innerHTML = `
+                <span class="bill-chip-num">${idx + 1}</span>
+                <span class="bill-chip-code">${code}</span>`;
+            frag.appendChild(chip);
+        });
+        ktdSelectedList.appendChild(frag);
+        ktdUpdateBillCount();
+    }
+
+    ktdBackBtn.addEventListener('click', () => {
+        _ktdBills = [];
+        ktdSelectedBills.style.display = 'none';
+        ktdCustomerList.style.display  = 'flex';
+        ktdUpdateBillCount();
+    });
+
+    // ── Customer search ──
+    let _ktdSearchTimer = null;
+    ktdCustomerSearch.addEventListener('input', () => {
+        const val = ktdCustomerSearch.value;
+        ktdClearSearch.style.display = val ? 'flex' : 'none';
+        clearTimeout(_ktdSearchTimer);
+        _ktdSearchTimer = setTimeout(() => ktdRenderCustomerList(val), 150);
+    });
+    ktdClearSearch.addEventListener('click', () => {
+        ktdCustomerSearch.value = '';
+        ktdClearSearch.style.display = 'none';
+        ktdRenderCustomerList('');
+    });
+
+    // ── Helper: chờ content script quét CPC trả kết quả ──
+    function waitForKtdCpcStepDone(timeoutMs = 120000) {
+        return new Promise((resolve) => {
+            let resolved = false;
+            const deadline = setTimeout(() => {
+                if (resolved) return;
+                resolved = true;
+                chrome.storage.onChanged.removeListener(listener);
+                resolve({ status: 'timeout', reason: 'Timeout sau ' + (timeoutMs / 1000) + 's' });
+            }, timeoutMs);
+
+            function listener(changes, ns) {
+                if (ns !== 'local' || resolved) return;
+                if (changes.__VTP_KTD_CPC_STEP_DONE__?.newValue) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(changes.__VTP_KTD_CPC_STEP_DONE__.newValue);
+                }
+            }
+            chrome.storage.onChanged.addListener(listener);
+
+            chrome.storage.local.get('__VTP_KTD_CPC_STEP_DONE__', (data) => {
+                if (data.__VTP_KTD_CPC_STEP_DONE__ && !resolved) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(data.__VTP_KTD_CPC_STEP_DONE__);
+                }
+            });
+        });
+    }
+
+    // ── Helper: chờ content script tra cứu hành trình trả kết quả ──
+    function waitForKtdStepDone(timeoutMs = 60000) {
+        return new Promise((resolve) => {
+            let resolved = false;
+            const deadline = setTimeout(() => {
+                if (resolved) return;
+                resolved = true;
+                chrome.storage.onChanged.removeListener(listener);
+                resolve({ status: 'timeout', reason: 'Timeout sau ' + (timeoutMs / 1000) + 's' });
+            }, timeoutMs);
+
+            function listener(changes, ns) {
+                if (ns !== 'local' || resolved) return;
+                if (changes.__VTP_KTD_STEP_DONE__?.newValue) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(changes.__VTP_KTD_STEP_DONE__.newValue);
+                }
+            }
+            chrome.storage.onChanged.addListener(listener);
+
+            // Backup check
+            chrome.storage.local.get('__VTP_KTD_STEP_DONE__', (data) => {
+                if (data.__VTP_KTD_STEP_DONE__ && !resolved) {
+                    resolved = true;
+                    clearTimeout(deadline);
+                    chrome.storage.onChanged.removeListener(listener);
+                    resolve(data.__VTP_KTD_STEP_DONE__);
+                }
+            });
+        });
+    }
+
+    // ── Phân loại trạng thái cho status pill ──
+    function getStatusClass(trangThai) {
+        const t = (trangThai || '').toLowerCase();
+        if (t.includes('thành công') || t.includes('đã phát') || t.includes('hoàn thành'))
+            return 's-success';
+        if (t.includes('đang giao') || t.includes('đang vận chuyển') || t.includes('phân công'))
+            return 's-info';
+        if (t.includes('chờ') || t.includes('bàn giao') || t.includes('đã nhận') || t.includes('nhập doanh thu'))
+            return 's-warning';
+        if (t.includes('hủy') || t.includes('trả lại') || t.includes('lỗi') || t.includes('không'))
+            return 's-error';
+        return 's-warning';
+    }
+
+    // ── Phân tích địa chỉ → tách cấp Xã/Phường và Huyện/Quận ──
+    //  Địa chỉ VN chuẩn: "số nhà đường, [thôn/ấp], xã/phường, [huyện/quận], tỉnh"
+    //  Sau sáp nhập nhiều nơi bỏ cấp huyện → "..., xã, tỉnh".
+    //  Chiến lược: ưu tiên nhận theo TIỀN TỐ text (bền vững), fallback theo
+    //  vị trí cột. KHÔNG match thôn/ấp/tổ ở cấp xã (fix bug nhóm bị lệch).
+    function parseAddressAdmin(address) {
+        if (!address) return { xa: '', huyen: '' };
+        const parts = address.replace(/ /g, ' ').split(',')
+            .map(p => p.trim()).filter(Boolean);
+        if (parts.length === 0) return { xa: '', huyen: '' };
+
+        const startsWithAny = (str, prefixes) => {
+            const lower = str.toLowerCase();
+            return prefixes.some(p => lower.startsWith(p));
+        };
+        const XA_PREFIX    = ['xã ', 'xa ', 'phường ', 'phuong ', 'thị trấn ', 'thi tran '];
+        const HUYEN_PREFIX = ['huyện ', 'huyen ', 'quận ', 'quan ', 'thị xã ', 'thi xa '];
+
+        // ── Tìm cấp Xã theo tiền tố (duyệt ngược) ──
+        let xaIdx = -1;
+        for (let i = parts.length - 1; i >= 0; i--) {
+            if (startsWithAny(parts[i], XA_PREFIX)) { xaIdx = i; break; }
+        }
+
+        let xa = xaIdx >= 0 ? parts[xaIdx] : '';
+        let huyen = '';
+
+        // ── Tìm cấp Huyện ──
+        // Cấp huyện LUÔN nằm ngay sau xã (địa chỉ chuẩn: xã, huyện, tỉnh).
+        // Lấy theo VỊ TRÍ đáng tin hơn quét tiền tố — tránh bắt nhầm cấp tỉnh
+        // "TP.HCM" thành huyện. Phần cuối luôn là tỉnh nên bỏ.
+        if (xaIdx >= 0) {
+            // parts[xaIdx+1] chỉ là huyện nếu SAU nó còn phần khác (tỉnh);
+            // nếu xaIdx+1 là phần cuối → đó là tỉnh → không có huyện.
+            if (xaIdx + 1 <= parts.length - 2) {
+                huyen = parts[xaIdx + 1];
+            }
+        } else {
+            // Không có tiền tố xã → thử tìm huyện theo tiền tố
+            for (let i = parts.length - 1; i >= 0; i--) {
+                if (startsWithAny(parts[i], HUYEN_PREFIX)) { huyen = parts[i]; break; }
+            }
+        }
+
+        // ── Fallback theo vị trí khi thiếu tiền tố xã ──
+        // Địa chỉ chuẩn: [..., xã, huyện, tỉnh] → xã=len-3, huyện=len-2
+        if (!xa && parts.length >= 3) {
+            xa = parts[parts.length - 3];
+            if (!huyen) huyen = parts[parts.length - 2];
+        }
+
+        return { xa, huyen };
+    }
+
+    // Giữ tương thích: trả về cấp xã dạng chuỗi
+    function extractWards(address) {
+        return parseAddressAdmin(address).xa;
+    }
+
+    // ── Render kết quả vào bảng ──
+    function ktdRenderResult(result, idx) {
+        const tr = document.createElement('tr');
+        const statusClass = result.status === 'error'
+            ? 's-error'
+            : getStatusClass(result.trangThai);
+        const statusText = result.status === 'error'
+            ? `Lỗi: ${result.reason || 'Không xác định'}`
+            : result.trangThai;
+
+        tr.innerHTML = `
+            <td>${idx + 1}</td>
+            <td><span class="ktd-code-text">${result.bill}</span></td>
+            <td><span class="ktd-status-pill ${statusClass}">${statusText}</span></td>
+            <td><span class="ktd-note-text">${result.tenNhan || '—'}</span></td>
+            <td><span class="ktd-note-text">${result.diaChiNhan || '—'}</span></td>
+            <td><span class="ktd-time-text">${result.thoiGian || '—'}</span></td>
+            <td><span class="ktd-note-text">${result.noiDung || '—'}</span></td>
+            <td><span class="ktd-note-text">${result.ghiChu || '—'}</span></td>`;
+        ktdResultsBody.appendChild(tr);
+    }
+
+    // ── START Button ──
+    startKtdBtn.addEventListener('click', async () => {
+        if (_ktdMode === 'chuaphancong') {
+            await runKtdChuaPhanCong();
+        } else if (_ktdMode === 'phancongtuyen') {
+            await runKtdPhanCongTuyen();
+        } else {
+            await runKtdDonDiExcel();
+        }
+    });
+
+    // 🚀 CHỨC NĂNG MỚI: QUÉT & TRA CỨU ĐƠN CHƯA PHÂN CÔNG
+    async function runKtdChuaPhanCong() {
+        // Tìm tab đang active
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) {
+            alert('Không tìm thấy tab trình duyệt phù hợp!');
+            return;
+        }
+
+        _ktdIsRunning = true;
+        startKtdBtn.disabled = true;
+        startKtdBtn.innerHTML = `<i class="bi bi-arrow-repeat spin" style="font-size: 14px;"></i> Đang quét mã…`;
+        ktdProgressCard.style.display = 'block';
+        ktdProgressBar.style.width = '10%';
+        ktdProgressText.textContent = '0 / 0';
+        ktdResultsCard.style.display = 'none';
+        ktdResultsBody.innerHTML = '';
+
+        if (ktdStatusMsg) ktdStatusMsg.textContent = 'Đang chuyển trang Khai thác đến…';
+        if (ktdStatusDot) ktdStatusDot.style.background = '#f59e0b';
+
+        // ═══════════════════════════════════════════
+        // PHA 1: Quét danh sách mã đơn tại trang Khai thác
+        // ═══════════════════════════════════════════
+        if (!tab.url?.includes('khai-thac-den/khai-thac')) {
+            await chrome.tabs.update(tab.id, { url: CPC_URL });
+            await new Promise((resolve) => {
+                const listener = (tabId, changeInfo) => {
+                    if (tabId === tab.id && changeInfo.status === 'complete') {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+            });
+            await new Promise(r => setTimeout(r, 2500)); // Chờ render ZK Framework
+            tab = await chrome.tabs.get(tab.id);
+        }
+
+        const mainTabId = tab.id;
+
+        try {
+            await chrome.storage.local.remove('__VTP_KTD_CPC_STEP_DONE__');
+        } catch (_) {}
+
+        // Inject script quét đơn chưa phân công
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: mainTabId },
+                files: ['src/shared/notification.js', 'src/modules/kiemtradon/kiemtradon_content.js']
+            });
+        } catch (e) {
+            console.error('[VTP CPC] Inject quét CPC thất bại:', e);
+            ktdStatusMsg.textContent = 'Lỗi: Không thể chạy script quét đơn. Hãy tải lại trang.';
+            ktdStatusDot.style.background = '#EE0033';
+            startKtdBtn.disabled = false;
+            startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Quét';
+            _ktdIsRunning = false;
+            return;
+        }
+
+        // Chờ script quét xong (max 120s)
+        const scanResult = await waitForKtdCpcStepDone(120000);
+        if (scanResult.status === 'error' || scanResult.status === 'timeout') {
+            ktdStatusMsg.textContent = `Lỗi quét mã: ${scanResult.reason || 'Timeout'}`;
+            ktdStatusDot.style.background = '#EE0033';
+            startKtdBtn.disabled = false;
+            startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Quét';
+            _ktdIsRunning = false;
+            return;
+        }
+
+        const scrapedBills = scanResult.bills || [];
+        if (scrapedBills.length === 0) {
+            ktdStatusMsg.textContent = 'Không tìm thấy đơn nào chưa phân công!';
+            ktdStatusDot.style.background = '#10B981';
+            startKtdBtn.disabled = false;
+            startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Quét';
+            _ktdIsRunning = false;
+            return;
+        }
+
+        console.log(`[VTP CPC] Quét được ${scrapedBills.length} đơn. Bắt đầu Phase 2: Tra cứu địa chỉ...`);
+        
+        // ═══════════════════════════════════════════
+        // PHA 2: Chuyển sang trang tra cứu để lấy địa chỉ nhận
+        // ═══════════════════════════════════════════
+        ktdProgressBar.style.width = '30%';
+        ktdProgressText.textContent = `0 / ${scrapedBills.length}`;
+        ktdStatusMsg.textContent = `Đã tìm thấy ${scrapedBills.length} đơn. Đang chuyển sang trang tra cứu hành trình…`;
+
+        await chrome.tabs.update(mainTabId, { url: KTD_URL });
+        await new Promise((resolve) => {
+            const listener = (tabId, changeInfo) => {
+                if (tabId === tab.id && changeInfo.status === 'complete') {
+                    chrome.tabs.onUpdated.removeListener(listener);
+                    resolve();
+                }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+        });
+        await new Promise(r => setTimeout(r, 2000)); // Chờ trang tra cứu render
+
+        _ktdResults = [];
+        ktdResultsCard.style.display = 'block';
+
+        const skipList = [];
+
+        for (let i = 0; i < scrapedBills.length; i++) {
+            if (!_ktdIsRunning) break;
+
+            const billData = scrapedBills[i];
+            const billCode = billData.billCode;
+
+            ktdStatusMsg.textContent = `Tra cứu địa chỉ ${i + 1}/${scrapedBills.length}: ${billCode}`;
+            const pct = 30 + Math.floor((i / scrapedBills.length) * 70);
+            ktdProgressBar.style.width = pct + '%';
+            ktdProgressText.textContent = `${i} / ${scrapedBills.length} (${pct}%)`;
+
+            try {
+                await chrome.storage.local.remove('__VTP_KTD_STEP_DONE__');
+            } catch (_) {}
+            await chrome.storage.local.set({ __VTP_KTD_CURRENT_BILL__: billCode });
+
+            // Inject script tra cứu hành trình dondi
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: mainTabId },
+                    files: ['src/shared/notification.js', 'src/modules/kiemtradon/kiemtradon_dondi_content.js']
+                });
+            } catch (e) {
+                console.error('[VTP CPC] Inject tra cứu thất bại:', e);
+                const failRow = {
+                    status: 'error',
+                    bill: billCode,
+                    reason: 'Inject tra cứu lỗi: ' + e.message,
+                    tenNhan: billData.recipient || '',
+                    diaChiNhan: ''
+                };
+                _ktdResults.push(failRow);
+                ktdRenderResult(failRow, _ktdResults.length - 1);
+                skipList.push(failRow);
+                continue;
+            }
+
+            const lookupResult = await waitForKtdStepDone(45000);
+            console.log(`[VTP CPC] Tra cứu mã ${billCode}:`, lookupResult.status);
+
+            const finalResult = {
+                status: lookupResult.status,
+                bill: billCode,
+                trangThai: lookupResult.trangThai || 'Không rõ',
+                tenNhan: lookupResult.tenNhan || billData.recipient || '',
+                diaChiNhan: lookupResult.diaChiNhan || '',
+                thoiGian: lookupResult.thoiGian || '',
+                noiDung: lookupResult.noiDung || '',
+                ghiChu: lookupResult.ghiChu || '',
+                reason: lookupResult.reason || ''
+            };
+
+            _ktdResults.push(finalResult);
+            ktdRenderResult(finalResult, _ktdResults.length - 1);
+
+            if (lookupResult.status === 'error' || lookupResult.status === 'timeout') {
+                skipList.push(finalResult);
+            }
+
+            // Cập nhật tiến độ
+            const pctDone = 30 + Math.floor(((i + 1) / scrapedBills.length) * 70);
+            ktdProgressBar.style.width = pctDone + '%';
+            ktdProgressText.textContent = `${i + 1} / ${scrapedBills.length} (${pctDone}%)`;
+            ktdResultSummary.textContent = `${_ktdResults.length} đơn đã tra cứu`;
+
+            if (i < scrapedBills.length - 1 && _ktdIsRunning) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // PHA 3: Tự động sắp xếp (Sort) theo cấp Xã/Phường
+        // ═══════════════════════════════════════════
+        if (_ktdIsRunning && _ktdResults.length > 0) {
+            ktdStatusMsg.textContent = 'Đang sắp xếp danh sách đơn theo cấp Xã…';
+            _ktdResults = sortResultsByWard(_ktdResults);
+
+            // Re-render bảng kết quả theo thứ tự đã sắp xếp
+            ktdResultsBody.innerHTML = '';
+            _ktdResults.forEach((res, idx) => {
+                ktdRenderResult(res, idx);
+            });
+        }
+
+        // Hoàn tất
+        _ktdIsRunning = false;
+        ktdProgressBar.style.width = '100%';
+        startKtdBtn.disabled = false;
+        startKtdBtn.innerHTML = '<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Quét';
+
+        if (skipList.length === 0) {
+            ktdStatusMsg.textContent = `✅ Hoàn thành! Quét và tra cứu ${_ktdResults.length} đơn.`;
+            ktdStatusDot.style.background = '#10B981';
+        } else {
+            ktdStatusMsg.textContent = `⚠️ Xong — ${skipList.length}/${scrapedBills.length} đơn tra cứu lỗi`;
+            ktdStatusDot.style.background = '#f59e0b';
+        }
+
+        // Tự động kích hoạt nút Xuất Excel luôn để người dùng tải file về
+        ktdExportBtn.click();
+
+        try {
+            await chrome.storage.local.remove(['__VTP_KTD_CURRENT_BILL__', '__VTP_KTD_STEP_DONE__', '__VTP_KTD_CPC_STEP_DONE__']);
+        } catch (_) {}
+    }
+
+    // 🚀 CHỨC NĂNG CŨ: KIỂM TRA ĐƠN ĐI TỪ EXCEL
+    async function runKtdDonDiExcel() {
+        const bills = _ktdBills.slice();
+        if (bills.length === 0) {
+            alert('Vui lòng chọn khách hàng để lấy danh sách mã phiếu gửi!');
+            return;
+        }
+
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab?.url?.includes('evtp2.viettelpost.vn')) {
+            await chrome.tabs.update(tab.id, { url: KTD_URL });
+            await new Promise((resolve) => {
+                const listener = (tabId, changeInfo) => {
+                    if (tabId === tab.id && changeInfo.status === 'complete') {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+            });
+            await new Promise(r => setTimeout(r, 2000));
+            tab = await chrome.tabs.get(tab.id);
+        }
+
+        const mainTabId = tab.id;
+        _ktdIsRunning  = true;
+        _ktdResults    = [];
+
+        startKtdBtn.disabled  = true;
+        startKtdBtn.innerHTML = `<i class="bi bi-arrow-repeat spin" style="font-size: 14px;"></i> Đang kiểm tra…`;
+        ktdResultsCard.style.display    = 'block';
+        ktdResultsBody.innerHTML        = '';
+        ktdProgressCard.style.display   = 'block';
+        ktdProgressBar.style.width      = '0%';
+        ktdProgressText.textContent     = `0 / ${bills.length}`;
+        if (ktdStatusMsg) ktdStatusMsg.textContent = `Đang kiểm tra 0/${bills.length}…`;
+        if (ktdStatusDot) ktdStatusDot.style.background = '#f59e0b';
+
+        const skipList = [];
+
+        for (let i = 0; i < bills.length; i++) {
+            if (!_ktdIsRunning) break;
+
+            const bill = bills[i];
+
+            if (ktdStatusMsg) ktdStatusMsg.textContent = `Đang tra cứu ${i + 1}/${bills.length}: ${bill}`;
+            const pct = Math.floor((i / bills.length) * 100);
+            ktdProgressBar.style.width  = pct + '%';
+            ktdProgressText.textContent = `${i} / ${bills.length} (${pct}%)`;
+
+            try { await chrome.storage.local.remove('__VTP_KTD_STEP_DONE__'); } catch (_) {}
+            await chrome.storage.local.set({ __VTP_KTD_CURRENT_BILL__: bill });
+
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: mainTabId },
+                    files: ['src/shared/notification.js', 'src/modules/kiemtradon/kiemtradon_dondi_content.js']
+                });
+            } catch (e) {
+                console.error('[VTP KTĐ] Lỗi inject:', e);
+                const errResult = { status: 'error', bill, reason: 'Inject thất bại: ' + e.message };
+                _ktdResults.push(errResult);
+                ktdRenderResult(errResult, _ktdResults.length - 1);
+                skipList.push(errResult);
+                continue;
+            }
+
+            const result = await waitForKtdStepDone(60000);
+            _ktdResults.push(result);
+            ktdRenderResult(result, _ktdResults.length - 1);
+
+            if (result.status === 'error' || result.status === 'timeout') {
+                skipList.push(result);
+            }
+
+            const pctDone = Math.floor(((i + 1) / bills.length) * 100);
+            ktdProgressBar.style.width  = pctDone + '%';
+            ktdProgressText.textContent = `${i + 1} / ${bills.length} (${pctDone}%)`;
+            ktdResultSummary.textContent = `${_ktdResults.length} đơn đã kiểm tra`;
+
+            if (i < bills.length - 1 && _ktdIsRunning) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+
+        _ktdIsRunning = false;
+        ktdProgressBar.style.width = '100%';
+        startKtdBtn.disabled  = false;
+        startKtdBtn.innerHTML = `<i class="bi bi-play-fill" style="font-size: 14px;"></i> Bắt Đầu Kiểm Tra`;
+
+        if (skipList.length === 0) {
+            if (ktdStatusMsg) ktdStatusMsg.textContent = `✅ Hoàn thành! Đã kiểm tra ${_ktdResults.length} đơn.`;
+            if (ktdStatusDot) ktdStatusDot.style.background = '#10B981';
+        } else {
+            if (ktdStatusMsg) ktdStatusMsg.textContent = `⚠️ Xong — ${skipList.length}/${bills.length} đơn lỗi`;
+            if (ktdStatusDot) ktdStatusDot.style.background = '#f59e0b';
+        }
+
+        try { await chrome.storage.local.remove(['__VTP_KTD_CURRENT_BILL__', '__VTP_KTD_STEP_DONE__']); } catch (_) {}
+    }
+
+    // ── Sắp xếp kết quả 2 cấp: Huyện/Quận → Xã/Phường ──
+    //  Cache kết quả parse vào từng phần tử (_xa, _huyen) để render + export
+    //  tái dùng, không parse lại nhiều lần.
+    function sortResultsByWard(results) {
+        results.forEach(r => {
+            const admin = parseAddressAdmin(r.diaChiNhan || '');
+            r._xa    = admin.xa;
+            r._huyen = admin.huyen;
+        });
+
+        // So sánh 1 cấp, đẩy giá trị rỗng xuống cuối
+        const cmp = (x, y) => {
+            const a = (x || '').toLowerCase();
+            const b = (y || '').toLowerCase();
+            if (!a && b) return 1;
+            if (a && !b) return -1;
+            if (!a && !b) return 0;
+            return a.localeCompare(b, 'vi');
+        };
+
+        return results.slice().sort((a, b) => {
+            const byHuyen = cmp(a._huyen, b._huyen);
+            if (byHuyen !== 0) return byHuyen;
+            return cmp(a._xa, b._xa);
+        });
+    }
+
+    // ── STOP Button ──
+    stopKtdBtn.addEventListener('click', () => {
+        _ktdIsRunning = false;
+        // Báo content script phân công dừng sau bưu tá hiện tại
+        try { chrome.storage.local.set({ __VTP_PHANCONG_CANCEL__: true }); } catch (_) {}
+        if (ktdStatusMsg) ktdStatusMsg.textContent = 'Đã dừng.';
+        if (ktdStatusDot) ktdStatusDot.style.background = '#78716C';
+        startKtdBtn.disabled  = false;
+        const stopLabels = {
+            chuaphancong:  'Bắt Đầu Quét',
+            phancongtuyen: 'Bắt Đầu Phân Công',
+            dondi:         'Bắt Đầu Kiểm Tra'
+        };
+        startKtdBtn.innerHTML =
+            `<i class="bi bi-play-fill" style="font-size: 14px;"></i> ${stopLabels[_ktdMode] || 'Bắt Đầu'}`;
+    });
+
+    // ── Helper: tạo worksheet từ mảng 2 chiều + auto-fit độ rộng cột ──
+    function buildSheet(wsData) {
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        ws['!cols'] = wsData[0].map((h, colIdx) => {
+            let maxLen = String(h || '').length;
+            wsData.slice(1).forEach(row => {
+                const cellLen = String(row[colIdx] || '').length;
+                if (cellLen > maxLen) maxLen = cellLen;
+            });
+            return { wch: Math.min(maxLen + 4, 60) };
+        });
+        return ws;
+    }
+
+    // ── Helper: đọc cấp Xã/Huyện của 1 kết quả (dùng cache nếu có) ──
+    function getAdmin(r) {
+        if (r._xa !== undefined && r._huyen !== undefined) {
+            return { xa: r._xa, huyen: r._huyen };
+        }
+        const admin = parseAddressAdmin(r.diaChiNhan || '');
+        r._xa = admin.xa;
+        r._huyen = admin.huyen;
+        return admin;
+    }
+
+    // ── Parse mã phiếu gửi theo lô (F) ──
+    //  Mã theo lô có dạng <base>-<index>F<total>, ví dụ:
+    //    146353703557-5F5  → kiện thứ 5 trong lô gồm 5 kiện (base = 146353703557)
+    //    146353703557-1F3  → kiện thứ 1 trong lô gồm 3 kiện
+    //  Trả về { base, index, total } hoặc null nếu mã không theo lô.
+    function parseLotCode(code) {
+        const m = String(code).toUpperCase().match(/^(.*?)-?(\d+)F(\d+)$/);
+        if (!m) return null;
+        const base  = m[1].replace(/-+$/, '');
+        const index = parseInt(m[2], 10);
+        const total = parseInt(m[3], 10);
+        if (!base || !total) return null;
+        return { base, index, total };
+    }
+
+    // ── Kiểm tra "đủ lô" cho danh sách mã phiếu gửi ──
+    //  Gom các mã cùng lô (cùng base) rồi so số kiện thu được với tổng số
+    //  kiện của lô. Trả về Map: billCode -> chuỗi trạng thái.
+    //    • Mã không theo lô        → không set (cột để trống)
+    //    • Đã thu đủ số kiện        → "Đủ lô (n/total)"
+    //    • Còn thiếu kiện           → "Thiếu (n/total)"
+    function computeLotStatus(codes) {
+        const parsed = new Map(); // billCode -> { base, index, total }
+        const lots   = new Map(); // base -> { total, indices:Set }
+
+        codes.forEach(code => {
+            const info = parseLotCode(code);
+            if (!info) return;
+            parsed.set(code, info);
+            if (!lots.has(info.base)) {
+                lots.set(info.base, { total: info.total, indices: new Set() });
+            }
+            const lot = lots.get(info.base);
+            lot.total = Math.max(lot.total, info.total); // phòng dữ liệu lệch
+            lot.indices.add(info.index);
+        });
+
+        const result = new Map();
+        parsed.forEach((info, code) => {
+            const lot  = lots.get(info.base);
+            const have = lot.indices.size;
+            result.set(code, have >= lot.total
+                ? `Đủ lô (${have}/${lot.total})`
+                : `Thiếu (${have}/${lot.total})`);
+        });
+        return result;
+    }
+
+    // ── EXPORT Button — Xuất file .xlsx (dùng SheetJS) ──
+    ktdExportBtn.addEventListener('click', () => {
+        if (_ktdResults.length === 0) {
+            alert('Chưa có kết quả để xuất!');
+            return;
+        }
+
+        const wb = XLSX.utils.book_new();
+        let fileNamePrefix;
+
+        if (_ktdMode === 'chuaphancong') {
+            // ── Tính trạng thái "đủ lô F" cho toàn bộ mã phiếu gửi ──
+            const lotStatusMap = computeLotStatus(_ktdResults.map(r => r.bill || ''));
+
+            // ── Sheet 1: danh sách đơn ──
+            // STT | Mã phiếu gửi | Tên bưu tá | Họ tên người nhận | Địa chỉ nhận | Check đủ lô F
+            //  • "Tên bưu tá" để TRỐNG — người dùng tự điền tên rút gọn (Nam, Hoài...)
+            //    rồi tải lại file này ở tab "Phân Công Tuyến" để phân công tự động.
+            const header1 = ['STT', 'Mã phiếu gửi', 'Tên bưu tá', 'Họ tên người nhận', 'Địa chỉ nhận', 'Check đủ lô F'];
+            const rows1 = _ktdResults.map((r, idx) => {
+                return [
+                    idx + 1,
+                    r.bill || '',
+                    '',                 // Tên bưu tá — để trống cho người dùng điền
+                    r.tenNhan || '',    // Họ tên người nhận
+                    r.diaChiNhan || '',
+                    lotStatusMap.get(r.bill || '') || ''
+                ];
+            });
+            XLSX.utils.book_append_sheet(wb, buildSheet([header1, ...rows1]), 'Đơn chưa phân công');
+
+            fileNamePrefix = 'VTP_DonChuaPhanCong';
+        } else {
+            // ── Đơn Đi (Excel) — giữ nguyên định dạng cũ ──
+            const header = ['STT', 'Mã phiếu gửi', 'Trạng thái đơn', 'Tên khách nhận', 'Địa chỉ nhận', 'Thời gian', 'Nội dung', 'Ghi chú'];
+            const rows = _ktdResults.map((r, idx) => [
+                idx + 1,
+                r.bill || '',
+                r.status === 'error'
+                    ? `Lỗi: ${r.reason || 'Không xác định'}`
+                    : (r.trangThai || ''),
+                r.tenNhan || '',
+                r.diaChiNhan || '',
+                r.thoiGian || '',
+                r.noiDung || '',
+                r.ghiChu || ''
+            ]);
+            XLSX.utils.book_append_sheet(wb, buildSheet([header, ...rows]), 'Hành trình đơn đi');
+            fileNamePrefix = 'VTP_HanhTrinhDonDi';
+        }
+
+        const wbOut = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        const blob = new Blob([wbOut], {
+            type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        });
+
+        const link = document.createElement('a');
+        link.href     = URL.createObjectURL(blob);
+        link.download = `${fileNamePrefix}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
     });
 
 });
